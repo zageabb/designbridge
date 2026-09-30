@@ -1,0 +1,91 @@
+{
+  "format": "designbridge",
+  "version": "0.1",
+  "document": {
+    "id": "scm-dashboard",
+    "name": "SCM Dashboard"
+  },
+  "tokens": {
+    "colors": {
+      "primary": "#173B67",
+      "surface": "#FFFFFF",
+      "muted": "#EEF3F8"
+    },
+    "spacing": {
+      "md": 16,
+      "lg": 24
+    }
+  },
+  "components": [],
+  "pages": [
+    {
+      "id": "dashboard",
+      "name": "Dashboard",
+      "children": [
+        {
+          "id": "dashboard-frame",
+          "type": "frame",
+          "name": "SCM Dashboard",
+          "width": 1440,
+          "height": 900,
+          "fill": "#F5F7FA",
+          "layout": {
+            "direction": "vertical",
+            "gap": 24,
+            "padding": 32,
+            "align": "stretch"
+          },
+          "children": [
+            {
+              "id": "page-title",
+              "type": "text",
+              "name": "Page title",
+              "text": "Supply Chain Management"
+            },
+            {
+              "id": "kpi-row",
+              "type": "frame",
+              "name": "KPI Row",
+              "layout": {
+                "direction": "horizontal",
+                "gap": 16,
+                "padding": 0,
+                "align": "stretch"
+              },
+              "children": [
+                {
+                  "id": "supplier-card",
+                  "type": "rectangle",
+                  "name": "Supplier KPI",
+                  "width": 260,
+                  "height": 140,
+                  "fill": "#FFFFFF"
+                },
+                {
+                  "id": "po-card",
+                  "type": "rectangle",
+                  "name": "Open PO KPI",
+                  "width": 260,
+                  "height": 140,
+                  "fill": "#FFFFFF"
+                },
+                {
+                  "id": "delivery-card",
+                  "type": "rectangle",
+                  "name": "Overdue Delivery KPI",
+                  "width": 260,
+                  "height": 140,
+                  "fill": "#FFFFFF"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "assets": [],
+  "metadata": {
+    "targets": ["penpot", "figma", "react"]
+  }
+}

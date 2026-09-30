@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>DesignBridge Importer</title>
+  <style>
+    body{font:13px system-ui,sans-serif;margin:0;padding:16px;background:#15191d;color:#f4f5f6}
+    h1{font-size:16px;margin:0 0 6px}.muted{color:#aab2ba;margin-bottom:14px}
+    textarea{width:100%;height:390px;box-sizing:border-box;background:#20262b;color:#f4f5f6;border:1px solid #3a444d;border-radius:7px;padding:10px;font:11px ui-monospace,monospace}
+    .row{display:flex;gap:8px;margin-top:10px}button,label.file{background:#2f88ff;color:white;border:0;border-radius:6px;padding:9px 12px;cursor:pointer}
+    label.file{background:#343d45}input[type=file]{display:none}#status{margin-top:10px;min-height:18px;color:#b8c4cf}
+  </style>
+</head>
+<body>
+  <h1>DesignBridge Importer</h1>
+  <div class="muted">Paste or load a <code>.designbridge.json</code> document.</div>
+  <textarea id="json" placeholder='{"format":"designbridge", ...}'></textarea>
+  <div class="row">
+    <label class="file">Load JSON<input id="file" type="file" accept=".json,.designbridge.json,application/json"></label>
+    <button id="import">Import into Penpot</button>
+  </div>
+  <div id="status"></div>
+<script>
+const input=document.getElementById("json"), status=document.getElementById("status");
+document.getElementById("file").addEventListener("change",async e=>{
+  const file=e.target.files?.[0]; if(file) input.value=await file.text();
+});
+document.getElementById("import").addEventListener("click",()=>{
+  try{
+    const document=JSON.parse(input.value);
+    status.textContent="Importing…";
+    parent.postMessage({type:"designbridge:import",document},"*");
+  }catch(error){status.textContent="Invalid JSON: "+error.message}
+});
+window.addEventListener("message",event=>{
+  const message=event.data;
+  if(message?.type!=="designbridge:import-result")return;
+  status.textContent=message.ok
+    ? "Imported "+message.result.pages+" page(s): "+message.result.name
+    : "Import failed: "+message.error;
+});
+</script>
+</body>
+</html>
