@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>DesignBridge</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,sans-serif;background:#eef3f8;color:#132238}
+    header{height:58px;background:#102a46;color:white;display:flex;align-items:center;padding:0 22px;font-weight:700}
+    main{display:grid;grid-template-columns:360px 1fr;gap:16;padding:16;height:calc(100vh - 58px)}
+    .panel{background:white;border-radius:10px;border:1px solid #d9e2ec;overflow:hidden;display:flex;flex-direction:column}
+    .panel h2{font-size:14px;margin:0;padding:12px 14px;border-bottom:1px solid #e5ebf0}
+    textarea{flex:1;border:0;resize:none;padding:14px;font:12px ui-monospace,SFMono-Regular,monospace;outline:none}
+    .actions{padding:10px;display:flex;gap:8px;border-top:1px solid #e5ebf0}
+    button{border:0;border-radius:7px;padding:9px 12px;background:#1769aa;color:white;cursor:pointer}
+    #status{padding:8px 12px;font-size:12px;min-height:32px}
+    #canvasWrap{overflow:auto;padding:24px;background:#dfe7ee;flex:1}
+    #canvas{position:relative;background:white;transform-origin:top left;box-shadow:0 4px 18px #0002}
+    .node{position:absolute;border:1px dashed transparent}.frame{border-color:#b7c7d8}.text{white-space:pre-wrap}
+  </style>
+</head>
+<body>
+<header>DesignBridge <span style="opacity:.65;margin-left:8px;font-weight:500">v0.1</span></header>
+<main>
+  <section class="panel">
+    <h2>DesignBridge JSON</h2>
+    <textarea id="editor"></textarea>
+    <div id="status"></div>
+    <div class="actions">
+      <button id="validate">Validate</button>
+      <button id="preview">Preview</button>
+    </div>
+  </section>
+  <section class="panel">
+    <h2>Preview</h2>
+    <div id="canvasWrap"><div id="canvas"></div></div>
+  </section>
+</main>
+<script>
+const sample = {
+  format:"designbridge",version:"0.1",
+  document:{id:"hello",name:"DesignBridge Demo"},
+  tokens:{},components:[],assets:[],metadata:{},
+  pages:[{id:"page",name:"Dashboard",children:[{
+    id:"root",type:"frame",name:"Dashboard",width:1200,height:760,fill:"#f5f7fa",
+    layout:{direction:"vertical",gap:24,padding:32,align:"stretch"},
+    children:[
+      {id:"title",type:"text",name:"Title",text:"DesignBridge",x:32,y:32},
+      {id:"card",type:"rectangle",name:"Card",x:32,y:100,width:300,height:150,fill:"#ffffff"}
+    ]
+  }]}]
+};
+const editor=document.getElementById("editor"), canvas=document.getElementById("canvas"), status=document.getElementById("status");
+editor.value=JSON.stringify(sample,null,2);
+
+function paint(node,parent,offsetX=0,offsetY=0){
+  const el=document.createElement("div");
+  el.className="node "+node.type;
+  el.dataset.id=node.id;
+  el.title=node.name;
+  el.style.left=(node.x??0)+"px"; el.style.top=(node.y??0)+"px";
+  if(node.width)el.style.width=node.width+"px"; if(node.height)el.style.height=node.height+"px";
+  if(node.fill)el.style.background=node.fill;
+  if(node.type==="text"){el.textContent=node.text||"";el.style.fontWeight="600";el.style.fontSize="20px";}
+  parent.appendChild(el);
+  (node.children||[]).forEach(child=>paint(child,el));
+}
+async function validate(){
+  const doc=JSON.parse(editor.value);
+  const res=await fetch("/api/validate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(doc)});
+  const data=await res.json();
+  if(!res.ok)throw new Error(JSON.stringify(data.detail||data));
+  status.textContent="Valid · "+data.pages+" page(s)";
+  return doc;
+}
+async function preview(){
+  try{
+    const doc=await validate(), root=doc.pages[0].children[0];
+    canvas.innerHTML="";canvas.style.width=(root.width||1200)+"px";canvas.style.height=(root.height||760)+"px";
+    canvas.style.background=root.fill||"#fff";
+    (root.children||[]).forEach(n=>paint(n,canvas));
+  }catch(e){status.textContent="Error: "+e.message}
+}
+document.getElementById("validate").onclick=()=>validate().catch(e=>status.textContent="Error: "+e.message);
+document.getElementById("preview").onclick=preview;
+preview();
+</script>
+</body>
+</html>
