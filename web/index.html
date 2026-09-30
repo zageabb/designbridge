@@ -7,7 +7,7 @@
   <style>
     *{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,sans-serif;background:#eef3f8;color:#132238}
     header{height:58px;background:#102a46;color:white;display:flex;align-items:center;padding:0 22px;font-weight:700}
-    main{display:grid;grid-template-columns:360px 1fr;gap:16;padding:16;height:calc(100vh - 58px)}
+    main{display:grid;grid-template-columns:380px 1fr;gap:16;padding:16;height:calc(100vh - 58px)}
     .panel{background:white;border-radius:10px;border:1px solid #d9e2ec;overflow:hidden;display:flex;flex-direction:column}
     .panel h2{font-size:14px;margin:0;padding:12px 14px;border-bottom:1px solid #e5ebf0}
     textarea{flex:1;border:0;resize:none;padding:14px;font:12px ui-monospace,SFMono-Regular,monospace;outline:none}
@@ -16,11 +16,11 @@
     #status{padding:8px 12px;font-size:12px;min-height:32px}
     #canvasWrap{overflow:auto;padding:24px;background:#dfe7ee;flex:1}
     #canvas{position:relative;background:white;transform-origin:top left;box-shadow:0 4px 18px #0002}
-    .node{position:absolute;border:1px dashed transparent}.frame{border-color:#b7c7d8}.text{white-space:pre-wrap}
+    .node{box-sizing:border-box}.positioned{position:absolute}.frame{border:1px dashed #b7c7d8}.text{white-space:pre-wrap}.instance{outline:1px dotted #6f7f90}
   </style>
 </head>
 <body>
-<header>DesignBridge <span style="opacity:.65;margin-left:8px;font-weight:500">v0.1</span></header>
+<header>DesignBridge <span style="opacity:.65;margin-left:8px;font-weight:500">v0.2</span></header>
 <main>
   <section class="panel">
     <h2>DesignBridge JSON</h2>
@@ -40,31 +40,71 @@
 const sample = {
   format:"designbridge",version:"0.1",
   document:{id:"hello",name:"DesignBridge Demo"},
-  tokens:{},components:[],assets:[],metadata:{},
+  tokens:{colors:{surface:{value:"#ffffff"},accent:{value:"#1769aa"}},spacing:{md:16},radius:{md:8},typography:{}},
+  components:[{
+    id:"kpi-card",type:"component",name:"KPI Card",width:260,height:140,fill_token:"surface",
+    layout:{direction:"vertical",gap:8,padding:16,align:"start"},
+    children:[
+      {id:"kpi-label",type:"text",name:"Label",text:"Open POs"},
+      {id:"kpi-value",type:"text",name:"Value",text:"127"}
+    ]
+  }],
+  assets:[],metadata:{},
   pages:[{id:"page",name:"Dashboard",children:[{
     id:"root",type:"frame",name:"Dashboard",width:1200,height:760,fill:"#f5f7fa",
     layout:{direction:"vertical",gap:24,padding:32,align:"stretch"},
     children:[
-      {id:"title",type:"text",name:"Title",text:"DesignBridge",x:32,y:32},
-      {id:"card",type:"rectangle",name:"Card",x:32,y:100,width:300,height:150,fill:"#ffffff"}
+      {id:"title",type:"text",name:"Title",text:"DesignBridge"},
+      {id:"kpis",type:"frame",name:"KPI Row",layout:{direction:"horizontal",gap:16,padding:0,align:"start"},
+       children:[
+        {id:"kpi1",type:"instance",name:"Open PO KPI",component_id:"kpi-card",width:260,height:140},
+        {id:"kpi2",type:"instance",name:"Delivery KPI",component_id:"kpi-card",width:260,height:140}
+       ]}
     ]
   }]}]
 };
 const editor=document.getElementById("editor"), canvas=document.getElementById("canvas"), status=document.getElementById("status");
 editor.value=JSON.stringify(sample,null,2);
 
-function paint(node,parent,offsetX=0,offsetY=0){
+function tokenValue(raw){return raw&&typeof raw==="object"&&"value" in raw?raw.value:raw}
+function resolveFill(node,doc){return node.fill_token?tokenValue(doc.tokens?.colors?.[node.fill_token]):node.fill}
+
+function materialize(node,doc){
+  if(node.type!=="instance") return node;
+  const component=(doc.components||[]).find(c=>c.id===node.component_id);
+  if(!component) return node;
+  return {...component,...node,type:"instance",children:component.children||[]};
+}
+
+function paint(raw,parent,doc){
+  const node=materialize(raw,doc);
   const el=document.createElement("div");
   el.className="node "+node.type;
   el.dataset.id=node.id;
   el.title=node.name;
-  el.style.left=(node.x??0)+"px"; el.style.top=(node.y??0)+"px";
-  if(node.width)el.style.width=node.width+"px"; if(node.height)el.style.height=node.height+"px";
-  if(node.fill)el.style.background=node.fill;
+  if(node.x!=null||node.y!=null){
+    el.classList.add("positioned");
+    el.style.left=(node.x??0)+"px";
+    el.style.top=(node.y??0)+"px";
+  }
+  if(node.width)el.style.width=node.width+"px";
+  if(node.height)el.style.height=node.height+"px";
+  const fill=resolveFill(node,doc); if(fill)el.style.background=fill;
   if(node.type==="text"){el.textContent=node.text||"";el.style.fontWeight="600";el.style.fontSize="20px";}
+
+  if(node.layout){
+    el.style.display="flex";
+    el.style.flexDirection=node.layout.direction==="horizontal"?"row":"column";
+    el.style.gap=(node.layout.gap||0)+"px";
+    el.style.padding=(node.layout.padding||0)+"px";
+    const alignMap={start:"flex-start",center:"center",end:"flex-end",stretch:"stretch"};
+    el.style.alignItems=alignMap[node.layout.align]||"flex-start";
+  }
+
   parent.appendChild(el);
-  (node.children||[]).forEach(child=>paint(child,el));
+  (node.children||[]).forEach(child=>paint(child,el,doc));
 }
+
 async function validate(){
   const doc=JSON.parse(editor.value);
   const res=await fetch("/api/validate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(doc)});
@@ -76,9 +116,22 @@ async function validate(){
 async function preview(){
   try{
     const doc=await validate(), root=doc.pages[0].children[0];
-    canvas.innerHTML="";canvas.style.width=(root.width||1200)+"px";canvas.style.height=(root.height||760)+"px";
-    canvas.style.background=root.fill||"#fff";
-    (root.children||[]).forEach(n=>paint(n,canvas));
+    canvas.innerHTML="";
+    canvas.style.width=(root.width||1200)+"px";
+    canvas.style.height=(root.height||760)+"px";
+    canvas.style.background=resolveFill(root,doc)||"#fff";
+    if(root.layout){
+      canvas.style.display="flex";
+      canvas.style.flexDirection=root.layout.direction==="horizontal"?"row":"column";
+      canvas.style.gap=(root.layout.gap||0)+"px";
+      canvas.style.padding=(root.layout.padding||0)+"px";
+      const alignMap={start:"flex-start",center:"center",end:"flex-end",stretch:"stretch"};
+      canvas.style.alignItems=alignMap[root.layout.align]||"flex-start";
+    } else {
+      canvas.style.display="block";
+      canvas.style.padding="0";
+    }
+    (root.children||[]).forEach(n=>paint(n,canvas,doc));
   }catch(e){status.textContent="Error: "+e.message}
 }
 document.getElementById("validate").onclick=()=>validate().catch(e=>status.textContent="Error: "+e.message);
