@@ -11,7 +11,8 @@
     .panel{background:white;border-radius:10px;border:1px solid #d9e2ec;overflow:hidden;display:flex;flex-direction:column}
     .panel h2{font-size:14px;margin:0;padding:12px 14px;border-bottom:1px solid #e5ebf0}
     #editor{flex:1;border:0;resize:none;padding:14px;font:12px ui-monospace,SFMono-Regular,monospace;outline:none;min-height:250px}
-    .ai{border-top:1px solid #e5ebf0;padding:12px;background:#f8fafc}
+    .ai,.sync{border-top:1px solid #e5ebf0;padding:12px;background:#f8fafc}
+    .sync textarea{width:100%;height:90px;resize:vertical;border:1px solid #cbd6e1;border-radius:7px;padding:9px;font:11px ui-monospace,monospace}
     .ai label{font-size:12px;font-weight:700;display:block;margin-bottom:6px}
     #instruction{width:100%;height:72px;resize:vertical;border:1px solid #cbd6e1;border-radius:7px;padding:9px;font:13px system-ui}
     .actions{padding:10px;display:flex;gap:8px;border-top:1px solid #e5ebf0;flex-wrap:wrap}
@@ -25,7 +26,7 @@
   </style>
 </head>
 <body>
-<header>DesignBridge <span style="opacity:.65;margin-left:8px;font-weight:500">v0.4</span></header>
+<header>DesignBridge <span style="opacity:.65;margin-left:8px;font-weight:500">v0.5</span></header>
 <main>
   <section class="panel">
     <h2>DesignBridge JSON</h2>
@@ -35,6 +36,14 @@
       <textarea id="instruction" placeholder="e.g. Make the KPI row more compact and change the accent colour to a darker blue."></textarea>
       <div style="margin-top:8px"><button id="propose">Propose change</button> <button id="accept" class="secondary" disabled>Accept proposal</button></div>
       <div id="proposal"></div>
+    </div>
+    <div class="sync">
+      <label for="penpotSnapshot" style="font-size:12px;font-weight:700;display:block;margin-bottom:6px">Penpot selection snapshot</label>
+      <textarea id="penpotSnapshot" placeholder="Paste snapshot JSON copied from the DesignBridge Penpot plugin"></textarea>
+      <div style="margin-top:8px">
+        <button id="comparePenpot" class="secondary">Compare Penpot</button>
+        <button id="acceptPenpot" class="secondary" disabled>Accept Penpot changes</button>
+      </div>
     </div>
     <div id="status"></div>
     <div class="actions">
@@ -71,7 +80,8 @@ const sample={
 
 const editor=document.getElementById("editor"),canvas=document.getElementById("canvas"),status=document.getElementById("status");
 const instruction=document.getElementById("instruction"),proposal=document.getElementById("proposal"),accept=document.getElementById("accept");
-let pending=null;
+const penpotSnapshot=document.getElementById("penpotSnapshot"),acceptPenpot=document.getElementById("acceptPenpot");
+let pending=null,pendingPenpot=null;
 editor.value=JSON.stringify(sample,null,2);
 
 function tokenValue(raw){return raw&&typeof raw==="object"&&"value" in raw?raw.value:raw}
@@ -147,9 +157,27 @@ async function stepRevision(direction){
     status.textContent=(direction==="undo"?"Undo":"Redo")+" → revision "+data.revision+".";
   }catch(e){status.textContent="Error: "+e.message}
 }
+async function comparePenpot(){
+  try{
+    const doc=await validate(),selection=JSON.parse(penpotSnapshot.value||"[]");
+    const res=await fetch("/api/penpot/compare",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({document:doc,selection})});
+    const data=await res.json();if(!res.ok)throw new Error(typeof data.detail==="string"?data.detail:JSON.stringify(data.detail));
+    pendingPenpot=data;acceptPenpot.disabled=false;renderDocument(data.preview.document);
+    status.textContent="Penpot comparison ready · "+data.preview.changes.length+" supported change(s).";
+  }catch(e){status.textContent="Error: "+e.message}
+}
+function acceptPenpotChanges(){
+  if(!pendingPenpot)return;
+  editor.value=JSON.stringify(pendingPenpot.preview.document,null,2);
+  renderDocument(pendingPenpot.preview.document);
+  pendingPenpot=null;acceptPenpot.disabled=true;
+  status.textContent="Penpot changes accepted into DesignBridge JSON.";
+}
 document.getElementById("save").onclick=saveRevision;
 document.getElementById("undo").onclick=()=>stepRevision("undo");
 document.getElementById("redo").onclick=()=>stepRevision("redo");
+document.getElementById("comparePenpot").onclick=comparePenpot;
+acceptPenpot.onclick=acceptPenpotChanges;
 preview();
 </script>
 </body>
