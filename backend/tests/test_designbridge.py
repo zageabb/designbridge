@@ -382,6 +382,7 @@ def test_direct_penpot_pull_and_push(monkeypatch, tmp_path):
     push = client.post(
         "/api/penpot/projects/demo/selection",
         json={
+            "expected_revision": 1,
             "selection": [
                 {
                     "penpot_id": "shape-1",
@@ -416,7 +417,7 @@ def test_direct_penpot_push_requires_linked_shape(monkeypatch, tmp_path):
 
     response = client.post(
         "/api/penpot/projects/demo/selection",
-        json={"selection": [{"penpot_id": "shape-1", "name": "Unlinked"}]},
+        json={"expected_revision": 1, "selection": [{"penpot_id": "shape-1", "name": "Unlinked"}]},
     )
     assert response.status_code == 422
 
