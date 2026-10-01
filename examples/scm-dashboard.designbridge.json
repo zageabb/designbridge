@@ -7,16 +7,49 @@
   },
   "tokens": {
     "colors": {
-      "primary": "#173B67",
-      "surface": "#FFFFFF",
-      "muted": "#EEF3F8"
+      "primary": {"value": "#173B67"},
+      "surface": {"value": "#FFFFFF"},
+      "background": {"value": "#F5F7FA"}
     },
     "spacing": {
       "md": 16,
       "lg": 24
-    }
+    },
+    "radius": {
+      "card": 10
+    },
+    "typography": {}
   },
-  "components": [],
+  "components": [
+    {
+      "id": "kpi-card",
+      "type": "component",
+      "name": "KPI Card",
+      "width": 260,
+      "height": 140,
+      "fill_token": "surface",
+      "layout": {
+        "direction": "vertical",
+        "gap": 8,
+        "padding": 16,
+        "align": "start"
+      },
+      "children": [
+        {
+          "id": "kpi-card-label",
+          "type": "text",
+          "name": "KPI Label",
+          "text": "KPI"
+        },
+        {
+          "id": "kpi-card-value",
+          "type": "text",
+          "name": "KPI Value",
+          "text": "127"
+        }
+      ]
+    }
+  ],
   "pages": [
     {
       "id": "dashboard",
@@ -28,7 +61,7 @@
           "name": "SCM Dashboard",
           "width": 1440,
           "height": 900,
-          "fill": "#F5F7FA",
+          "fill_token": "background",
           "layout": {
             "direction": "vertical",
             "gap": 24,
@@ -50,32 +83,32 @@
                 "direction": "horizontal",
                 "gap": 16,
                 "padding": 0,
-                "align": "stretch"
+                "align": "start"
               },
               "children": [
                 {
                   "id": "supplier-card",
-                  "type": "rectangle",
+                  "type": "instance",
                   "name": "Supplier KPI",
+                  "component_id": "kpi-card",
                   "width": 260,
-                  "height": 140,
-                  "fill": "#FFFFFF"
+                  "height": 140
                 },
                 {
                   "id": "po-card",
-                  "type": "rectangle",
+                  "type": "instance",
                   "name": "Open PO KPI",
+                  "component_id": "kpi-card",
                   "width": 260,
-                  "height": 140,
-                  "fill": "#FFFFFF"
+                  "height": 140
                 },
                 {
                   "id": "delivery-card",
-                  "type": "rectangle",
+                  "type": "instance",
                   "name": "Overdue Delivery KPI",
+                  "component_id": "kpi-card",
                   "width": 260,
-                  "height": 140,
-                  "fill": "#FFFFFF"
+                  "height": 140
                 }
               ]
             }
