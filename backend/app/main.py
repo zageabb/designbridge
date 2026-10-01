@@ -11,7 +11,7 @@ from .operations import OperationBatch, apply_operations
 from .penpot_sync import PenpotShapeSnapshot, compare_penpot_snapshot
 from .storage import DesignStore
 
-app = FastAPI(title="DesignBridge API", version="0.6.0")
+app = FastAPI(title="DesignBridge API", version="0.8.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -32,7 +32,7 @@ STORE = DesignStore(DATA_ROOT / "designbridge.db")
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "service": "designbridge", "version": "0.6.0"}
+    return {"status": "ok", "service": "designbridge", "version": "0.8.0"}
 
 
 @app.post("/api/validate")
@@ -133,7 +133,36 @@ def penpot_current_project(project_id: str) -> dict:
     return {
         "project_id": project_id,
         "revision": result["revision"],
+        "description": result["description"],
+        "created_at": result["created_at"],
         "document": result["document"].model_dump(mode="json", exclude_none=True),
+    }
+
+
+@app.get("/api/penpot/projects/{project_id}/status")
+def penpot_project_status(project_id: str, local_revision: int | None = None) -> dict:
+    try:
+        current = STORE.load(project_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="project not found")
+
+    current_revision = int(current["revision"])
+    if local_revision is None:
+        state = "unknown"
+    elif local_revision == current_revision:
+        state = "in_sync"
+    elif local_revision < current_revision:
+        state = "behind"
+    else:
+        state = "ahead"
+
+    return {
+        "project_id": project_id,
+        "local_revision": local_revision,
+        "current_revision": current_revision,
+        "state": state,
+        "updated_at": current["created_at"],
+        "description": current["description"],
     }
 
 
@@ -141,6 +170,19 @@ def penpot_current_project(project_id: str) -> dict:
 def penpot_sync_selection(project_id: str, payload: dict) -> dict:
     try:
         current = STORE.load(project_id)
+        expected_revision = payload.get("expected_revision")
+        if expected_revision is None:
+            raise ValueError("expected_revision is required")
+        if int(expected_revision) != int(current["revision"]):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "revision_conflict",
+                    "message": "Penpot is based on an older DesignBridge revision",
+                    "expected_revision": int(expected_revision),
+                    "current_revision": int(current["revision"]),
+                },
+            )
         document = current["document"]
         snapshots = [
             PenpotShapeSnapshot.model_validate(item)
@@ -159,6 +201,8 @@ def penpot_sync_selection(project_id: str, payload: dict) -> dict:
         raise HTTPException(status_code=404, detail="project not found")
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
+    except HTTPException:
+        raise
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
