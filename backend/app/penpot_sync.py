@@ -27,6 +27,9 @@ class PenpotShapeSnapshot(BaseModel):
     layout_gap: float | None = None
     layout_padding: float | None = None
     layout_align: str | None = None
+    component_role: str | None = None
+    component_id: str | None = None
+    component_root_designbridge_id: str | None = None
 
 
 def _node_index(document: DesignBridgeDocument) -> dict[str, DesignNode]:

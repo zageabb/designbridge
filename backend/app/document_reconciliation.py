@@ -37,7 +37,11 @@ def reconcile_document(
 ) -> dict[str, Any]:
     expected = _expected_locations(latest)
     linked = [item for item in raw_snapshots if item.get("designbridge_id")]
-    ids = [str(item["designbridge_id"]) for item in linked]
+    direct_linked = [
+        item for item in linked
+        if item.get("component_role") != "copy_member"
+    ]
+    ids = [str(item["designbridge_id"]) for item in direct_linked]
     counts = Counter(ids)
 
     duplicate_ids = sorted(node_id for node_id, count in counts.items() if count > 1)
@@ -67,7 +71,7 @@ def reconcile_document(
 
     snapshots = [
         PenpotShapeSnapshot.model_validate(item)
-        for item in linked
+        for item in direct_linked
         if item.get("designbridge_id") in expected
     ]
     review = three_way_review(base, latest, snapshots) if snapshots else {
@@ -82,7 +86,7 @@ def reconcile_document(
         "nodes": [],
     }
 
-    for item in linked:
+    for item in direct_linked:
         node_id = str(item.get("designbridge_id"))
         meta = expected.get(node_id)
         if not meta:
