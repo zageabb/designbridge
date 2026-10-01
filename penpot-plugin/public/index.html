@@ -20,9 +20,13 @@
     <label class="file">Load JSON<input id="file" type="file" accept=".json,.designbridge.json,application/json"></label>
     <button id="import">Import into Penpot</button>
   </div>
+  <div class="row">
+    <button id="selection" style="background:#343d45">Refresh selection</button>
+  </div>
+  <div id="selectionStatus" class="muted" style="margin-top:10px">No DesignBridge selection.</div>
   <div id="status"></div>
 <script>
-const input=document.getElementById("json"), status=document.getElementById("status");
+const input=document.getElementById("json"), status=document.getElementById("status"), selectionStatus=document.getElementById("selectionStatus");
 document.getElementById("file").addEventListener("change",async e=>{
   const file=e.target.files?.[0]; if(file) input.value=await file.text();
 });
@@ -33,8 +37,18 @@ document.getElementById("import").addEventListener("click",()=>{
     parent.postMessage({type:"designbridge:import",document},"*");
   }catch(error){status.textContent="Invalid JSON: "+error.message}
 });
+document.getElementById("selection").addEventListener("click",()=>{
+  parent.postMessage({type:"designbridge:get-selection"},"*");
+});
 window.addEventListener("message",event=>{
   const message=event.data;
+  if(message?.type==="designbridge:selection"){
+    const linked=(message.selection||[]).filter(item=>item.designbridge_id);
+    selectionStatus.textContent=linked.length
+      ? "Selected: "+linked.map(item=>item.name+" ["+item.designbridge_id+"]").join(", ")
+      : "Selection has no DesignBridge-linked shapes.";
+    return;
+  }
   if(message?.type!=="designbridge:import-result")return;
   status.textContent=message.ok
     ? "Imported "+message.result.pages+" page(s): "+message.result.name
