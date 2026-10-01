@@ -961,3 +961,31 @@ def test_penpot_capture_instance_overrides_blocks_stale_revision(monkeypatch, tm
         },
     )
     assert response.status_code == 409
+
+
+def test_instance_overrides_are_validated():
+    document = DesignBridgeDocument.model_validate(VALID).model_copy(deep=True)
+    instance = document.pages[0].children[0].children[1]
+    instance.overrides = {"card-label": {"text": "Instance text"}}
+    validated = DesignBridgeDocument.model_validate(
+        document.model_dump(mode="json", exclude_none=True)
+    )
+    assert validated.pages[0].children[0].children[1].overrides["card-label"]["text"] == "Instance text"
+
+
+def test_non_instance_node_cannot_define_overrides():
+    invalid = DesignBridgeDocument.model_validate(VALID).model_dump(mode="json", exclude_none=True)
+    invalid["pages"][0]["children"][0]["overrides"] = {
+        "title": {"text": "Nope"}
+    }
+    with pytest.raises(ValidationError):
+        DesignBridgeDocument.model_validate(invalid)
+
+
+def test_instance_override_rejects_unsupported_property():
+    invalid = DesignBridgeDocument.model_validate(VALID).model_dump(mode="json", exclude_none=True)
+    invalid["pages"][0]["children"][0]["children"][1]["overrides"] = {
+        "card-label": {"width": 200}
+    }
+    with pytest.raises(ValidationError):
+        DesignBridgeDocument.model_validate(invalid)
