@@ -52,6 +52,7 @@ class DesignNode(BaseModel):
     component_id: str | None = None
     variant_group: str | None = None
     variant_properties: dict[str, str] = Field(default_factory=dict)
+    variant_slot: str | None = None
     overrides: dict[str, dict[str, str | float | bool | None]] = Field(default_factory=dict)
     layout: Layout | None = None
     children: list["DesignNode"] = Field(default_factory=list)
@@ -153,6 +154,19 @@ class DesignBridgeDocument(BaseModel):
                         f"{dict(component.variant_properties)}"
                     )
                 variant_keys.add(key)
+
+                slots: set[str] = set()
+                def collect_slots(node: DesignNode) -> None:
+                    if node.variant_slot:
+                        if node.variant_slot in slots:
+                            raise ValueError(
+                                f"duplicate variant_slot in component {component.id}: {node.variant_slot}"
+                            )
+                        slots.add(node.variant_slot)
+                    for child in node.children:
+                        collect_slots(child)
+                for child in component.children:
+                    collect_slots(child)
             walk(component)
         for page in self.pages:
             for child in page.children:
