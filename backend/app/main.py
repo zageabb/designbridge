@@ -6,6 +6,7 @@ from fastapi.responses import FileResponse
 from pydantic import ValidationError
 
 from .design_agent import propose_operations
+from .document_reconciliation import reconcile_document
 from .models import DesignBridgeDocument
 from .operations import DesignOperation, OperationBatch, apply_operations
 from .penpot_sync import PenpotShapeSnapshot, compare_penpot_snapshot
@@ -13,7 +14,7 @@ from .revision_diff import compare_documents, selective_pull_plan
 from .storage import DesignStore
 from .three_way import resolution_plan, three_way_review
 
-app = FastAPI(title="DesignBridge API", version="0.13.0")
+app = FastAPI(title="DesignBridge API", version="0.14.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -34,7 +35,7 @@ STORE = DesignStore(DATA_ROOT / "designbridge.db")
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "service": "designbridge", "version": "0.13.0"}
+    return {"status": "ok", "service": "designbridge", "version": "0.14.0"}
 
 
 @app.post("/api/validate")
@@ -187,6 +188,33 @@ def penpot_project_diff(
         "from_description": before["description"],
         "to_description": after["description"],
         "diff": compare_documents(before["document"], after["document"]),
+    }
+
+
+@app.post("/api/penpot/projects/{project_id}/document-reconciliation")
+def penpot_document_reconciliation(project_id: str, payload: dict) -> dict:
+    try:
+        from_revision = int(payload["from_revision"])
+        base = STORE.load(project_id, from_revision)
+        latest = STORE.load(project_id)
+        snapshots = [dict(item) for item in payload.get("snapshots", [])]
+        reconciliation = reconcile_document(
+            base["document"],
+            latest["document"],
+            snapshots,
+        )
+    except KeyError as exc:
+        if exc.args and exc.args[0] == "from_revision":
+            raise HTTPException(status_code=422, detail="from_revision is required") from exc
+        raise HTTPException(status_code=404, detail="project or revision not found") from exc
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return {
+        "project_id": project_id,
+        "from_revision": base["revision"],
+        "to_revision": latest["revision"],
+        "reconciliation": reconciliation,
     }
 
 

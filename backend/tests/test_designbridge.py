@@ -818,3 +818,42 @@ def test_penpot_property_resolution_remote_choice_does_not_create_revision(monke
     assert body["remote_updates"] == [
         {"node_id": "title", "property": "text", "value": "Remote text"}
     ]
+
+
+def test_penpot_document_reconciliation_endpoint(monkeypatch, tmp_path):
+    from app import main as main_module
+    from app.storage import DesignStore
+
+    store = DesignStore(tmp_path / "document-reconciliation.db")
+    monkeypatch.setattr(main_module, "STORE", store)
+    client = TestClient(main_module.app)
+
+    assert client.post(
+        "/api/projects/save",
+        json={"document": VALID, "description": "initial"},
+    ).status_code == 200
+
+    response = client.post(
+        "/api/penpot/projects/demo/document-reconciliation",
+        json={
+            "from_revision": 1,
+            "snapshots": [
+                {
+                    "designbridge_id": "title",
+                    "designbridge_page_id": "page",
+                    "page_id": "penpot-page",
+                    "page_name": "Page",
+                    "name": "Title",
+                    "type": "text",
+                    "text": "Hello",
+                }
+            ],
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["from_revision"] == 1
+    assert body["to_revision"] == 1
+    assert body["reconciliation"]["summary"]["expected_nodes"] == 5
+    assert body["reconciliation"]["summary"]["linked_nodes"] == 1
+    assert body["reconciliation"]["summary"]["missing_nodes"] == 4
