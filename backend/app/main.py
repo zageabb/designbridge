@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import ValidationError
 
+from .design_agent import propose_operations
 from .models import DesignBridgeDocument
 from .operations import OperationBatch, apply_operations
 
@@ -48,6 +49,35 @@ def apply_design_operations(payload: dict) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return result.model_dump(mode="json", exclude_none=True)
+
+
+@app.post("/api/operations/propose")
+async def propose_design_operations(payload: dict) -> dict:
+    try:
+        document = DesignBridgeDocument.model_validate(payload["document"])
+        instruction = str(payload["instruction"]).strip()
+        if not instruction:
+            raise ValueError("instruction is required")
+        batch = await propose_operations(
+            document,
+            instruction,
+            base_url=payload.get("ollama_url"),
+            model=payload.get("model"),
+        )
+        preview = apply_operations(document, batch)
+    except KeyError as exc:
+        raise HTTPException(status_code=422, detail=f"missing field: {exc.args[0]}") from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"design model request failed: {exc}") from exc
+
+    return {
+        "batch": batch.model_dump(mode="json", exclude_none=True),
+        "preview": preview.model_dump(mode="json", exclude_none=True),
+    }
 
 
 @app.get("/")
