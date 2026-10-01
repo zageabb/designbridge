@@ -11,7 +11,7 @@ from .operations import OperationBatch, apply_operations
 from .penpot_sync import PenpotShapeSnapshot, compare_penpot_snapshot
 from .storage import DesignStore
 
-app = FastAPI(title="DesignBridge API", version="0.8.0")
+app = FastAPI(title="DesignBridge API", version="0.9.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -32,7 +32,7 @@ STORE = DesignStore(DATA_ROOT / "designbridge.db")
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "service": "designbridge", "version": "0.8.0"}
+    return {"status": "ok", "service": "designbridge", "version": "0.9.0"}
 
 
 @app.post("/api/validate")
