@@ -358,3 +358,64 @@ def test_penpot_compare_rejects_unlinked_selection():
         },
     )
     assert response.status_code == 422
+
+
+def test_direct_penpot_pull_and_push(monkeypatch, tmp_path):
+    from app import main as main_module
+    from app.storage import DesignStore
+
+    store = DesignStore(tmp_path / "direct-sync.db")
+    monkeypatch.setattr(main_module, "STORE", store)
+    client = TestClient(main_module.app)
+
+    save = client.post(
+        "/api/projects/save",
+        json={"document": VALID, "description": "initial"},
+    )
+    assert save.status_code == 200
+
+    pull = client.get("/api/penpot/projects/demo/current")
+    assert pull.status_code == 200
+    assert pull.json()["revision"] == 1
+    assert pull.json()["document"]["document"]["id"] == "demo"
+
+    push = client.post(
+        "/api/penpot/projects/demo/selection",
+        json={
+            "selection": [
+                {
+                    "penpot_id": "shape-1",
+                    "designbridge_id": "title",
+                    "designbridge_type": "text",
+                    "name": "Title",
+                    "type": "text",
+                    "text": "Changed directly from Penpot",
+                }
+            ],
+            "description": "Penpot direct sync test",
+        },
+    )
+    assert push.status_code == 200
+    body = push.json()
+    assert body["revision"] == 2
+    assert body["document"]["pages"][0]["children"][0]["children"][0]["text"] == "Changed directly from Penpot"
+
+    latest = client.get("/api/penpot/projects/demo/current")
+    assert latest.status_code == 200
+    assert latest.json()["revision"] == 2
+
+
+def test_direct_penpot_push_requires_linked_shape(monkeypatch, tmp_path):
+    from app import main as main_module
+    from app.storage import DesignStore
+
+    store = DesignStore(tmp_path / "direct-sync-empty.db")
+    store.save(DesignBridgeDocument.model_validate(VALID), description="initial")
+    monkeypatch.setattr(main_module, "STORE", store)
+    client = TestClient(main_module.app)
+
+    response = client.post(
+        "/api/penpot/projects/demo/selection",
+        json={"selection": [{"penpot_id": "shape-1", "name": "Unlinked"}]},
+    )
+    assert response.status_code == 422
