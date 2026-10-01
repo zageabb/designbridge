@@ -30,6 +30,7 @@
     </div>
     <div id="syncStatus" class="muted" style="margin:8px 0 0">Not connected.</div>
     <div id="latestSummary" class="muted" style="margin:6px 0 0;display:none"></div>
+    <div id="diffSummary" style="margin-top:8px;display:none;border-top:1px solid #343d45;padding-top:8px"></div>
   </div>
   <textarea id="json" placeholder='{"format":"designbridge", ...}'></textarea>
   <div class="row">
@@ -48,7 +49,7 @@
 <script>
 const input=document.getElementById("json"), status=document.getElementById("status"), selectionStatus=document.getElementById("selectionStatus");
 const apiUrl=document.getElementById("apiUrl"),syncStatus=document.getElementById("syncStatus"),projectIdEl=document.getElementById("projectId"),revisionState=document.getElementById("revisionState");
-const updateBadge=document.getElementById("updateBadge"),latestSummary=document.getElementById("latestSummary");
+const updateBadge=document.getElementById("updateBadge"),latestSummary=document.getElementById("latestSummary"),diffSummary=document.getElementById("diffSummary");
 let lastSelection=[],projectId=null,localRevision=null,currentRevision=null,statusTimer=null;
 try{
   const remembered=localStorage.getItem("designbridge:api-url");
@@ -82,9 +83,11 @@ async function refreshStatus(){
       syncStatus.textContent="DesignBridge has a newer revision. Review or pull latest before pushing Penpot edits.";
       latestSummary.style.display="block";
       latestSummary.textContent="Latest: revision "+data.current_revision+(data.description?" · "+data.description:"");
+      reviewDiff().catch(()=>{});
     }else if(data.state==="in_sync"){
       syncStatus.textContent="Penpot and DesignBridge are in sync at revision "+data.current_revision+".";
       latestSummary.style.display="none";
+      diffSummary.style.display="none";
     }else if(data.state==="ahead"){
       syncStatus.textContent="Penpot revision is ahead of DesignBridge. Pull latest before making further changes.";
       latestSummary.style.display="block";
@@ -104,6 +107,30 @@ async function testConnection(){
   }catch(error){syncStatus.textContent="Connection failed: "+error.message}
 }
 
+
+function renderDiff(data){
+  const diff=data.diff||{}, summary=diff.summary||{};
+  const parts=[
+    (summary.added||0)+" added",
+    (summary.removed||0)+" removed",
+    (summary.changed||0)+" changed",
+    (summary.token_sections_changed||0)+" token sections"
+  ];
+  const rows=[];
+  for(const item of diff.changed||[]){
+    rows.push("<div><strong>"+item.node_id+"</strong> · "+Object.keys(item.properties||{}).join(", ")+"</div>");
+  }
+  for(const item of diff.added||[])rows.push("<div>+ <strong>"+item.node_id+"</strong> · added</div>");
+  for(const item of diff.removed||[])rows.push("<div>− <strong>"+item.node_id+"</strong> · removed</div>");
+  diffSummary.style.display="block";
+  diffSummary.innerHTML="<div class='muted' style='margin:0 0 6px'>Changes: "+parts.join(" · ")+"</div>"+(rows.slice(0,20).join("")||"<div>No node-level changes.</div>");
+}
+async function reviewDiff(){
+  if(!projectId||localRevision==null)return;
+  const data=await api("/api/penpot/projects/"+encodeURIComponent(projectId)+"/diff?from_revision="+encodeURIComponent(localRevision));
+  renderDiff(data);
+}
+
 async function reviewLatest(){
   try{
     if(!projectId)throw new Error("This Penpot file is not linked to a DesignBridge project yet.");
@@ -112,6 +139,7 @@ async function reviewLatest(){
     latestSummary.style.display="block";
     latestSummary.textContent="Revision "+data.revision+(data.description?" · "+data.description:"")+(data.created_at?" · "+new Date(data.created_at).toLocaleString():"");
     input.value=JSON.stringify(data.document,null,2);
+    await reviewDiff();
     syncStatus.textContent="Reviewing revision "+data.revision+". Penpot canvas has not been changed.";
   }catch(error){syncStatus.textContent="Review failed: "+error.message}
 }

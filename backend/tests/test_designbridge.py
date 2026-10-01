@@ -557,3 +557,51 @@ def test_penpot_current_and_status_include_revision_metadata(monkeypatch, tmp_pa
     assert state["state"] == "behind"
     assert state["description"] == "Review me"
     assert state["updated_at"]
+
+
+def test_penpot_revision_diff_endpoint(monkeypatch, tmp_path):
+    from app import main as main_module
+    from app.storage import DesignStore
+
+    store = DesignStore(tmp_path / "revision-diff.db")
+    monkeypatch.setattr(main_module, "STORE", store)
+    client = TestClient(main_module.app)
+
+    first = client.post(
+        "/api/projects/save",
+        json={"document": VALID, "description": "initial"},
+    )
+    assert first.status_code == 200
+
+    changed = {**VALID}
+    changed["pages"] = [
+        {
+            **VALID["pages"][0],
+            "children": [
+                {
+                    **VALID["pages"][0]["children"][0],
+                    "children": [
+                        {
+                            **VALID["pages"][0]["children"][0]["children"][0],
+                            "text": "Revision two",
+                        },
+                        VALID["pages"][0]["children"][0]["children"][1],
+                    ],
+                }
+            ],
+        }
+    ]
+    second = client.post(
+        "/api/projects/save",
+        json={"document": changed, "description": "change title"},
+    )
+    assert second.status_code == 200
+
+    response = client.get("/api/penpot/projects/demo/diff?from_revision=1")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["from_revision"] == 1
+    assert body["to_revision"] == 2
+    assert body["diff"]["summary"]["changed"] == 1
+    assert body["diff"]["changed"][0]["node_id"] == "title"
+    assert "text" in body["diff"]["changed"][0]["properties"]
