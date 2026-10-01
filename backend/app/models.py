@@ -50,6 +50,8 @@ class DesignNode(BaseModel):
     fill: str | None = None
     fill_token: str | None = None
     component_id: str | None = None
+    variant_group: str | None = None
+    variant_properties: dict[str, str] = Field(default_factory=dict)
     overrides: dict[str, dict[str, str | float | bool | None]] = Field(default_factory=dict)
     layout: Layout | None = None
     children: list["DesignNode"] = Field(default_factory=list)
@@ -62,6 +64,12 @@ class DesignNode(BaseModel):
             raise ValueError("instance nodes require component_id")
         if self.type == "instance" and self.children:
             raise ValueError("instance nodes cannot contain children")
+        if self.type not in {"component", "instance"} and self.variant_group is not None:
+            raise ValueError("only component or instance nodes may define variant_group")
+        if self.type != "component" and self.variant_properties:
+            raise ValueError("only component nodes may define variant_properties")
+        if self.variant_properties and not self.variant_group:
+            raise ValueError("component variant_properties require variant_group")
         if self.type != "instance" and self.overrides:
             raise ValueError("only instance nodes may define overrides")
         allowed_override_properties = {"text", "name", "fill"}
@@ -118,12 +126,33 @@ class DesignBridgeDocument(BaseModel):
             seen.add(node.id)
             if node.type == "instance" and node.component_id not in component_ids:
                 raise ValueError(f"unknown component_id: {node.component_id}")
+            if node.type == "instance" and node.variant_group:
+                component = next(
+                    (item for item in self.components if item.id == node.component_id),
+                    None,
+                )
+                if component is None or component.variant_group != node.variant_group:
+                    raise ValueError(
+                        f"instance {node.id} variant_group does not match component {node.component_id}"
+                    )
             for child in node.children:
                 walk(child)
 
+        variant_keys: set[tuple[str, tuple[tuple[str, str], ...]]] = set()
         for component in self.components:
             if component.type != "component":
                 raise ValueError("top-level components must use type 'component'")
+            if component.variant_group:
+                key = (
+                    component.variant_group,
+                    tuple(sorted(component.variant_properties.items())),
+                )
+                if key in variant_keys:
+                    raise ValueError(
+                        f"duplicate variant definition in group {component.variant_group}: "
+                        f"{dict(component.variant_properties)}"
+                    )
+                variant_keys.add(key)
             walk(component)
         for page in self.pages:
             for child in page.children:
