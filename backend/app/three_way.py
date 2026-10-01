@@ -148,3 +148,65 @@ def three_way_review(
         },
         "nodes": reviews,
     }
+
+
+def resolution_plan(
+    base: DesignBridgeDocument,
+    latest: DesignBridgeDocument,
+    snapshots: list[PenpotShapeSnapshot],
+    resolutions: list[dict[str, str]],
+) -> dict[str, Any]:
+    review = three_way_review(base, latest, snapshots)
+    review_by_node = {item["node_id"]: item for item in review["nodes"]}
+
+    requested: dict[tuple[str, str], str] = {}
+    for item in resolutions:
+        node_id = str(item.get("node_id") or "").strip()
+        property_name = str(item.get("property") or "").strip()
+        choice = str(item.get("choice") or "").strip()
+        if not node_id or not property_name or choice not in {"local", "remote"}:
+            raise ValueError("each resolution requires node_id, property, and choice local|remote")
+        requested[(node_id, property_name)] = choice
+
+    required: set[tuple[str, str]] = set()
+    for node in review["nodes"]:
+        for property_name, detail in node["properties"].items():
+            if detail["classification"] in {"conflict", "local_only", "remote_only"}:
+                required.add((node["node_id"], property_name))
+
+    unknown = sorted(set(requested) - required)
+    if unknown:
+        raise ValueError(
+            "resolution does not match an outstanding property: "
+            + ", ".join(f"{node}.{prop}" for node, prop in unknown)
+        )
+
+    remote_updates: list[dict[str, Any]] = []
+    local_changes: dict[str, dict[str, Any]] = {}
+
+    for (node_id, property_name), choice in requested.items():
+        detail = review_by_node[node_id]["properties"][property_name]
+        if choice == "remote":
+            remote_updates.append({
+                "node_id": node_id,
+                "property": property_name,
+                "value": detail["latest"],
+            })
+        else:
+            local_changes.setdefault(node_id, {})[property_name] = detail["local"]
+
+    unresolved = sorted(required - set(requested))
+    return {
+        "review": review,
+        "remote_updates": remote_updates,
+        "local_changes": local_changes,
+        "resolved": [
+            {"node_id": node, "property": prop, "choice": choice}
+            for (node, prop), choice in sorted(requested.items())
+        ],
+        "unresolved": [
+            {"node_id": node, "property": prop}
+            for node, prop in unresolved
+        ],
+        "complete": not unresolved,
+    }
