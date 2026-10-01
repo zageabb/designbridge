@@ -112,3 +112,111 @@ def _insert(container: list[DesignNode], node: DesignNode, index: int | None) ->
         container.append(node)
     else:
         container.insert(index, node)
+
+
+def apply_operations(source: DesignBridgeDocument, batch: OperationBatch) -> OperationResult:
+    document = source.model_copy(deep=True)
+    changes: list[AppliedChange] = []
+
+    for operation in batch.operations:
+        if operation.action == "update_node":
+            ref = _find_node(document, operation.node_id or "")
+            if not ref:
+                raise ValueError(f"unknown node_id: {operation.node_id}")
+            before = ref.node.model_dump(mode="json", exclude_none=True)
+            updated = ref.node.model_copy(update=deepcopy(operation.changes))
+            updated = DesignNode.model_validate(
+                updated.model_dump(mode="json", exclude_none=True)
+            )
+            ref.container[ref.index] = updated
+            changes.append(
+                AppliedChange(
+                    action=operation.action,
+                    target=operation.node_id or "",
+                    before=before,
+                    after=updated.model_dump(mode="json", exclude_none=True),
+                )
+            )
+
+        elif operation.action == "add_node":
+            if operation.node is None:
+                raise ValueError("add_node requires node")
+            if _find_node(document, operation.node.id):
+                raise ValueError(f"duplicate node id: {operation.node.id}")
+            container = _target_container(
+                document, operation.parent_id, operation.page_id
+            )
+            node = operation.node.model_copy(deep=True)
+            _insert(container, node, operation.index)
+            changes.append(
+                AppliedChange(
+                    action=operation.action,
+                    target=node.id,
+                    after=node.model_dump(mode="json", exclude_none=True),
+                )
+            )
+
+        elif operation.action == "remove_node":
+            ref = _find_node(document, operation.node_id or "")
+            if not ref:
+                raise ValueError(f"unknown node_id: {operation.node_id}")
+            before = ref.node.model_dump(mode="json", exclude_none=True)
+            del ref.container[ref.index]
+            changes.append(
+                AppliedChange(
+                    action=operation.action,
+                    target=operation.node_id or "",
+                    before=before,
+                )
+            )
+
+        elif operation.action == "move_node":
+            ref = _find_node(document, operation.node_id or "")
+            if not ref:
+                raise ValueError(f"unknown node_id: {operation.node_id}")
+            node = ref.node
+            old_index = ref.index
+            del ref.container[ref.index]
+            target = _target_container(
+                document, operation.parent_id, operation.page_id
+            )
+            _insert(target, node, operation.index)
+            changes.append(
+                AppliedChange(
+                    action=operation.action,
+                    target=operation.node_id or "",
+                    before={"index": old_index},
+                    after={"index": operation.index},
+                )
+            )
+
+        elif operation.action == "set_color_token":
+            name = operation.token_name or ""
+            before = document.tokens.colors.get(name)
+            document.tokens.colors[name] = operation.token_value
+            changes.append(
+                AppliedChange(
+                    action=operation.action,
+                    target=name,
+                    before=before,
+                    after=operation.token_value,
+                )
+            )
+
+        elif operation.action == "set_spacing_token":
+            name = operation.token_name or ""
+            before = document.tokens.spacing.get(name)
+            document.tokens.spacing[name] = operation.token_value
+            changes.append(
+                AppliedChange(
+                    action=operation.action,
+                    target=name,
+                    before=before,
+                    after=operation.token_value,
+                )
+            )
+
+    validated = DesignBridgeDocument.model_validate(
+        document.model_dump(mode="json", exclude_none=True)
+    )
+    return OperationResult(document=validated, changes=changes)
