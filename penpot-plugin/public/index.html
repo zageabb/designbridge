@@ -26,6 +26,7 @@
       <button id="connect">Test connection</button>
       <button id="reviewLatest">Review latest</button>
       <button id="checkConflicts">Check local conflicts</button>
+      <button id="reviewDocument">Review whole document</button>
       <button id="pullLatest">Pull latest</button>
       <button id="pushSelection">Push selection</button>
     </div>
@@ -34,6 +35,7 @@
     <div id="diffSummary" style="margin-top:8px;display:none;border-top:1px solid #343d45;padding-top:8px"></div>
     <div id="selectivePull" style="margin-top:8px;display:none"></div>
     <div id="conflictSummary" style="margin-top:8px;display:none;border-top:1px solid #343d45;padding-top:8px"></div>
+    <div id="documentSummary" style="margin-top:8px;display:none;border-top:1px solid #343d45;padding-top:8px"></div>
   </div>
   <textarea id="json" placeholder='{"format":"designbridge", ...}'></textarea>
   <div class="row">
@@ -52,8 +54,8 @@
 <script>
 const input=document.getElementById("json"), status=document.getElementById("status"), selectionStatus=document.getElementById("selectionStatus");
 const apiUrl=document.getElementById("apiUrl"),syncStatus=document.getElementById("syncStatus"),projectIdEl=document.getElementById("projectId"),revisionState=document.getElementById("revisionState");
-const updateBadge=document.getElementById("updateBadge"),latestSummary=document.getElementById("latestSummary"),diffSummary=document.getElementById("diffSummary"),selectivePull=document.getElementById("selectivePull"),conflictSummary=document.getElementById("conflictSummary");
-let lastSelection=[],projectId=null,localRevision=null,currentRevision=null,statusTimer=null,lastDiff=null,linkedSnapshotResolver=null,lastLinkedSnapshots=[];
+const updateBadge=document.getElementById("updateBadge"),latestSummary=document.getElementById("latestSummary"),diffSummary=document.getElementById("diffSummary"),selectivePull=document.getElementById("selectivePull"),conflictSummary=document.getElementById("conflictSummary"),documentSummary=document.getElementById("documentSummary");
+let lastSelection=[],projectId=null,localRevision=null,currentRevision=null,statusTimer=null,lastDiff=null,linkedSnapshotResolver=null,documentSnapshotResolver=null,lastLinkedSnapshots=[];
 try{
   const remembered=localStorage.getItem("designbridge:api-url");
   if(remembered)apiUrl.value=remembered;
@@ -143,6 +145,51 @@ function renderDiff(data){
   }
 }
 
+
+
+function requestDocumentSnapshot(){
+  return new Promise((resolve,reject)=>{
+    documentSnapshotResolver=resolve;
+    parent.postMessage({type:"designbridge:get-document-snapshot"},"*");
+    setTimeout(()=>{
+      if(documentSnapshotResolver){
+        documentSnapshotResolver=null;
+        reject(new Error("Timed out waiting for Penpot document snapshot."));
+      }
+    },3000);
+  });
+}
+function renderDocumentReconciliation(data){
+  const rec=data.reconciliation||{}, summary=rec.summary||{};
+  const rows=(rec.pages||[]).map(page=>
+    "<div style='margin:4px 0'><strong>"+page.page_name+"</strong> · "+page.linked+"/"+page.expected+" linked · "+page.coverage_percent+"%"+
+    (page.missing?.length?"<br><span class='muted'>missing: "+page.missing.join(", ")+"</span>":"")+"</div>"
+  );
+  const review=rec.review?.summary||{};
+  documentSummary.style.display="block";
+  documentSummary.innerHTML=
+    "<div class='muted' style='margin:0 0 6px'>Document coverage: "+(summary.linked_nodes||0)+"/"+(summary.expected_nodes||0)+" · "+(summary.coverage_percent||0)+"% · "+(summary.pages_incomplete||0)+" incomplete page(s)</div>"+
+    "<div class='muted' style='margin:0 0 6px'>Conflicts: "+(review.conflict_properties||0)+" · local-only: "+(review.local_only_properties||0)+" · remote-only: "+(review.remote_only_properties||0)+"</div>"+
+    (rows.join("")||"<div>No canonical pages found.</div>")+
+    ((rec.unknown_linked_node_ids||[]).length?"<div class='muted' style='margin-top:6px'>Unknown links: "+rec.unknown_linked_node_ids.join(", ")+"</div>":"")+
+    ((rec.duplicate_link_ids||[]).length?"<div class='muted' style='margin-top:6px'>Duplicate links: "+rec.duplicate_link_ids.join(", ")+"</div>":"");
+}
+async function reviewWholeDocument(){
+  try{
+    if(!projectId||localRevision==null)throw new Error("A linked DesignBridge revision is required.");
+    const snapshot=await requestDocumentSnapshot();
+    lastLinkedSnapshots=snapshot.snapshots||[];
+    const data=await api(
+      "/api/penpot/projects/"+encodeURIComponent(projectId)+"/document-reconciliation",
+      {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({from_revision:localRevision,snapshots:lastLinkedSnapshots})}
+    );
+    renderDocumentReconciliation(data);
+    const s=data.reconciliation?.summary||{};
+    syncStatus.textContent="Document review complete: "+(s.coverage_percent||0)+"% linked coverage.";
+  }catch(error){
+    syncStatus.textContent="Document review failed: "+error.message;
+  }
+}
 
 function requestLinkedSnapshot(){
   return new Promise((resolve,reject)=>{
@@ -319,6 +366,7 @@ async function pushSelection(){
 document.getElementById("connect").addEventListener("click",testConnection);
 document.getElementById("reviewLatest").addEventListener("click",reviewLatest);
 document.getElementById("checkConflicts").addEventListener("click",checkLocalConflicts);
+document.getElementById("reviewDocument").addEventListener("click",reviewWholeDocument);
 document.getElementById("pullLatest").addEventListener("click",pullLatest);
 document.getElementById("pushSelection").addEventListener("click",pushSelection);
 
@@ -364,6 +412,14 @@ window.addEventListener("message",event=>{
       startStatusPolling();
     }else{
       revisionState.textContent="not linked";
+    }
+    return;
+  }
+  if(message?.type==="designbridge:document-snapshot"){
+    if(documentSnapshotResolver){
+      const resolve=documentSnapshotResolver;
+      documentSnapshotResolver=null;
+      resolve({snapshots:message.snapshots||[],pages:message.pages||[]});
     }
     return;
   }
