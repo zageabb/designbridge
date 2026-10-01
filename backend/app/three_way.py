@@ -40,28 +40,40 @@ def _canonical_properties(node: DesignNode) -> dict[str, Any]:
 
 
 def _snapshot_properties(snapshot: PenpotShapeSnapshot, base: DesignNode) -> dict[str, Any]:
-    props: dict[str, Any] = {
-        "name": snapshot.name,
-        "x": snapshot.x if base.x is not None else None,
-        "y": snapshot.y if base.y is not None else None,
-        "width": snapshot.width if base.width is not None else None,
-        "height": snapshot.height if base.height is not None else None,
-    }
-    if base.type == "text":
+    provided = snapshot.model_fields_set
+    props: dict[str, Any] = {}
+    if "name" in provided:
+        props["name"] = snapshot.name
+    if base.x is not None and "x" in provided:
+        props["x"] = snapshot.x
+    if base.y is not None and "y" in provided:
+        props["y"] = snapshot.y
+    if base.width is not None and "width" in provided:
+        props["width"] = snapshot.width
+    if base.height is not None and "height" in provided:
+        props["height"] = snapshot.height
+    if base.type == "text" and "text" in provided:
         props["text"] = snapshot.text
-    if base.fill_token is None:
+    if base.fill_token is None and "fill" in provided:
         props["fill"] = snapshot.fill
     if base.layout is not None:
-        layout = base.layout.model_dump(mode="json")
-        if snapshot.layout_direction in {"horizontal", "vertical"}:
-            layout["direction"] = snapshot.layout_direction
-        if snapshot.layout_gap is not None:
-            layout["gap"] = snapshot.layout_gap
-        if snapshot.layout_padding is not None:
-            layout["padding"] = snapshot.layout_padding
-        if snapshot.layout_align in {"start", "center", "end", "stretch"}:
-            layout["align"] = snapshot.layout_align
-        props["layout"] = layout
+        layout_fields = {
+            "layout_direction",
+            "layout_gap",
+            "layout_padding",
+            "layout_align",
+        }
+        if provided & layout_fields:
+            layout = base.layout.model_dump(mode="json")
+            if snapshot.layout_direction in {"horizontal", "vertical"}:
+                layout["direction"] = snapshot.layout_direction
+            if snapshot.layout_gap is not None:
+                layout["gap"] = snapshot.layout_gap
+            if snapshot.layout_padding is not None:
+                layout["padding"] = snapshot.layout_padding
+            if snapshot.layout_align in {"start", "center", "end", "stretch"}:
+                layout["align"] = snapshot.layout_align
+            props["layout"] = layout
     return props
 
 
@@ -91,12 +103,13 @@ def three_way_review(
         remote_only: list[str] = []
         same_change: list[str] = []
 
-        for key in sorted(set(base_props) | set(local_props) | set(latest_props)):
+        for key in sorted(set(base_props) | set(latest_props)):
             base_value = base_props.get(key)
-            local_value = local_props.get(key)
+            has_local = key in local_props
+            local_value = local_props.get(key, base_value)
             latest_value = latest_props.get(key)
 
-            local_changed = local_value != base_value
+            local_changed = has_local and local_value != base_value
             remote_changed = latest_value != base_value
             conflict = local_changed and remote_changed and local_value != latest_value
 
@@ -147,4 +160,66 @@ def three_way_review(
             "same_change_properties": sum(len(item["same_change"]) for item in reviews),
         },
         "nodes": reviews,
+    }
+
+
+def resolution_plan(
+    base: DesignBridgeDocument,
+    latest: DesignBridgeDocument,
+    snapshots: list[PenpotShapeSnapshot],
+    resolutions: list[dict[str, str]],
+) -> dict[str, Any]:
+    review = three_way_review(base, latest, snapshots)
+    review_by_node = {item["node_id"]: item for item in review["nodes"]}
+
+    requested: dict[tuple[str, str], str] = {}
+    for item in resolutions:
+        node_id = str(item.get("node_id") or "").strip()
+        property_name = str(item.get("property") or "").strip()
+        choice = str(item.get("choice") or "").strip()
+        if not node_id or not property_name or choice not in {"local", "remote"}:
+            raise ValueError("each resolution requires node_id, property, and choice local|remote")
+        requested[(node_id, property_name)] = choice
+
+    required: set[tuple[str, str]] = set()
+    for node in review["nodes"]:
+        for property_name, detail in node["properties"].items():
+            if detail["classification"] in {"conflict", "local_only", "remote_only"}:
+                required.add((node["node_id"], property_name))
+
+    unknown = sorted(set(requested) - required)
+    if unknown:
+        raise ValueError(
+            "resolution does not match an outstanding property: "
+            + ", ".join(f"{node}.{prop}" for node, prop in unknown)
+        )
+
+    remote_updates: list[dict[str, Any]] = []
+    local_changes: dict[str, dict[str, Any]] = {}
+
+    for (node_id, property_name), choice in requested.items():
+        detail = review_by_node[node_id]["properties"][property_name]
+        if choice == "remote":
+            remote_updates.append({
+                "node_id": node_id,
+                "property": property_name,
+                "value": detail["latest"],
+            })
+        else:
+            local_changes.setdefault(node_id, {})[property_name] = detail["local"]
+
+    unresolved = sorted(required - set(requested))
+    return {
+        "review": review,
+        "remote_updates": remote_updates,
+        "local_changes": local_changes,
+        "resolved": [
+            {"node_id": node, "property": prop, "choice": choice}
+            for (node, prop), choice in sorted(requested.items())
+        ],
+        "unresolved": [
+            {"node_id": node, "property": prop}
+            for node, prop in unresolved
+        ],
+        "complete": not unresolved,
     }

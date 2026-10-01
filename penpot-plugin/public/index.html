@@ -53,7 +53,7 @@
 const input=document.getElementById("json"), status=document.getElementById("status"), selectionStatus=document.getElementById("selectionStatus");
 const apiUrl=document.getElementById("apiUrl"),syncStatus=document.getElementById("syncStatus"),projectIdEl=document.getElementById("projectId"),revisionState=document.getElementById("revisionState");
 const updateBadge=document.getElementById("updateBadge"),latestSummary=document.getElementById("latestSummary"),diffSummary=document.getElementById("diffSummary"),selectivePull=document.getElementById("selectivePull"),conflictSummary=document.getElementById("conflictSummary");
-let lastSelection=[],projectId=null,localRevision=null,currentRevision=null,statusTimer=null,lastDiff=null,linkedSnapshotResolver=null;
+let lastSelection=[],projectId=null,localRevision=null,currentRevision=null,statusTimer=null,lastDiff=null,linkedSnapshotResolver=null,lastLinkedSnapshots=[];
 try{
   const remembered=localStorage.getItem("designbridge:api-url");
   if(remembered)apiUrl.value=remembered;
@@ -160,22 +160,26 @@ function renderThreeWay(data){
   const review=data.review||{}, summary=review.summary||{}, rows=[];
   for(const node of review.nodes||[]){
     for(const [property,detail] of Object.entries(node.properties||{})){
-      if(detail.classification==="conflict"){
-        rows.push("<div style='margin:4px 0'><strong>"+node.node_id+"."+property+"</strong> · conflict<br><span class='muted'>base: "+JSON.stringify(detail.base)+" · Penpot: "+JSON.stringify(detail.local)+" · DesignBridge: "+JSON.stringify(detail.latest)+"</span></div>");
-      }else if(detail.classification==="local_only"){
-        rows.push("<div style='margin:4px 0'>"+node.node_id+"."+property+" · local Penpot edit</div>");
-      }
+      if(!["conflict","local_only","remote_only"].includes(detail.classification))continue;
+      rows.push("<div style='margin:6px 0'><strong>"+node.node_id+"."+property+"</strong> · "+detail.classification+
+        "<br><span class='muted'>base: "+JSON.stringify(detail.base)+" · Penpot: "+JSON.stringify(detail.local)+" · DesignBridge: "+JSON.stringify(detail.latest)+"</span>"+
+        "<br><select class='resolutionChoice' data-node='"+node.node_id+"' data-property='"+property+"' style='margin-top:4px;background:#20262b;color:#f4f5f6;border:1px solid #3a444d;border-radius:4px;padding:4px'>"+
+        "<option value=''>Choose resolution…</option><option value='local'>Keep Penpot</option><option value='remote'>Use DesignBridge</option></select></div>");
     }
   }
   conflictSummary.style.display="block";
   conflictSummary.innerHTML=
     "<div class='muted' style='margin:0 0 6px'>Three-way review: "+(summary.conflict_properties||0)+" conflict(s) · "+(summary.local_only_properties||0)+" local-only edit(s)</div>"+
-    (rows.slice(0,24).join("")||"<div>No local edits or conflicting properties detected on linked shapes on this page.</div>");
+    (rows.slice(0,24).join("")||"<div>No local edits or conflicting properties detected on linked shapes on this page.</div>")+
+    (rows.length?"<button id='applyResolutions' style='margin-top:8px'>Apply property resolutions</button>":"");
+  const button=document.getElementById("applyResolutions");
+  if(button)button.onclick=applyPropertyResolutions;
 }
 async function checkLocalConflicts(){
   try{
     if(!projectId||localRevision==null)throw new Error("A linked DesignBridge revision is required.");
     const snapshots=await requestLinkedSnapshot();
+    lastLinkedSnapshots=snapshots;
     const data=await api(
       "/api/penpot/projects/"+encodeURIComponent(projectId)+"/three-way-review",
       {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({from_revision:localRevision,snapshots})}
@@ -187,6 +191,43 @@ async function checkLocalConflicts(){
       : "Three-way review found no conflicting local Penpot edits.";
   }catch(error){
     syncStatus.textContent="Conflict review failed: "+error.message;
+  }
+}
+
+
+async function applyPropertyResolutions(){
+  try{
+    if(!projectId||localRevision==null)throw new Error("A linked DesignBridge revision is required.");
+    const controls=[...document.querySelectorAll(".resolutionChoice")];
+    if(!controls.length)throw new Error("There are no outstanding properties to resolve.");
+    const unresolved=controls.filter(el=>!el.value);
+    if(unresolved.length)throw new Error("Choose Keep Penpot or Use DesignBridge for every outstanding property.");
+    const resolutions=controls.map(el=>({
+      node_id:el.dataset.node,
+      property:el.dataset.property,
+      choice:el.value
+    }));
+    const data=await api(
+      "/api/penpot/projects/"+encodeURIComponent(projectId)+"/resolve-properties",
+      {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
+        from_revision:localRevision,
+        snapshots:lastLinkedSnapshots,
+        resolutions,
+        description:"Resolve Penpot property conflicts"
+      })}
+    );
+    if(!data.complete)throw new Error("Resolution set is incomplete.");
+    if((data.remote_updates||[]).length){
+      parent.postMessage({type:"designbridge:apply-property-updates",updates:data.remote_updates},"*");
+    }
+    input.value=JSON.stringify(data.document,null,2);
+    setRevision(data.final_revision);
+    currentRevision=data.final_revision;
+    syncStatus.textContent="Property resolutions applied. Penpot is synchronized at revision "+data.final_revision+".";
+    conflictSummary.style.display="none";
+    await refreshStatus();
+  }catch(error){
+    syncStatus.textContent="Resolution failed: "+error.message;
   }
 }
 

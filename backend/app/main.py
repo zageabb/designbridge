@@ -7,13 +7,13 @@ from pydantic import ValidationError
 
 from .design_agent import propose_operations
 from .models import DesignBridgeDocument
-from .operations import OperationBatch, apply_operations
+from .operations import DesignOperation, OperationBatch, apply_operations
 from .penpot_sync import PenpotShapeSnapshot, compare_penpot_snapshot
 from .revision_diff import compare_documents, selective_pull_plan
 from .storage import DesignStore
-from .three_way import three_way_review
+from .three_way import resolution_plan, three_way_review
 
-app = FastAPI(title="DesignBridge API", version="0.12.0")
+app = FastAPI(title="DesignBridge API", version="0.13.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -34,7 +34,7 @@ STORE = DesignStore(DATA_ROOT / "designbridge.db")
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "service": "designbridge", "version": "0.12.0"}
+    return {"status": "ok", "service": "designbridge", "version": "0.13.0"}
 
 
 @app.post("/api/validate")
@@ -218,6 +218,81 @@ def penpot_three_way_review(project_id: str, payload: dict) -> dict:
         "from_revision": base["revision"],
         "to_revision": latest["revision"],
         "review": review,
+    }
+
+
+@app.post("/api/penpot/projects/{project_id}/resolve-properties")
+def penpot_resolve_properties(project_id: str, payload: dict) -> dict:
+    try:
+        from_revision = int(payload["from_revision"])
+        base = STORE.load(project_id, from_revision)
+        latest = STORE.load(project_id)
+        snapshots = [
+            PenpotShapeSnapshot.model_validate(item)
+            for item in payload.get("snapshots", [])
+            if item.get("designbridge_id")
+        ]
+        if not snapshots:
+            raise ValueError("no DesignBridge-linked Penpot snapshots supplied")
+
+        plan = resolution_plan(
+            base["document"],
+            latest["document"],
+            snapshots,
+            [dict(item) for item in payload.get("resolutions", [])],
+        )
+
+        final_document = latest["document"]
+        final_revision = latest["revision"]
+        saved = None
+
+        if plan["complete"] and plan["local_changes"]:
+            operations = [
+                DesignOperation(
+                    action="update_node",
+                    node_id=node_id,
+                    changes=changes,
+                )
+                for node_id, changes in plan["local_changes"].items()
+            ]
+            applied = apply_operations(
+                latest["document"],
+                OperationBatch(
+                    description="Resolve Penpot property conflicts",
+                    operations=operations,
+                ),
+            )
+            final_document = applied.document
+            saved = STORE.save(
+                final_document,
+                description=str(
+                    payload.get("description")
+                    or "Resolve Penpot property conflicts"
+                ),
+            )
+            final_revision = saved["revision"]
+
+    except KeyError as exc:
+        if exc.args and exc.args[0] == "from_revision":
+            raise HTTPException(status_code=422, detail="from_revision is required") from exc
+        raise HTTPException(status_code=404, detail="project or revision not found") from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return {
+        "project_id": project_id,
+        "from_revision": base["revision"],
+        "latest_revision": latest["revision"],
+        "final_revision": final_revision,
+        "complete": plan["complete"],
+        "resolved": plan["resolved"],
+        "unresolved": plan["unresolved"],
+        "remote_updates": plan["remote_updates"],
+        "local_changes": plan["local_changes"],
+        "document": final_document.model_dump(mode="json", exclude_none=True),
+        "saved_revision": saved,
     }
 
 
