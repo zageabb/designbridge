@@ -40,28 +40,40 @@ def _canonical_properties(node: DesignNode) -> dict[str, Any]:
 
 
 def _snapshot_properties(snapshot: PenpotShapeSnapshot, base: DesignNode) -> dict[str, Any]:
-    props: dict[str, Any] = {
-        "name": snapshot.name,
-        "x": snapshot.x if base.x is not None else None,
-        "y": snapshot.y if base.y is not None else None,
-        "width": snapshot.width if base.width is not None else None,
-        "height": snapshot.height if base.height is not None else None,
-    }
-    if base.type == "text":
+    provided = snapshot.model_fields_set
+    props: dict[str, Any] = {}
+    if "name" in provided:
+        props["name"] = snapshot.name
+    if base.x is not None and "x" in provided:
+        props["x"] = snapshot.x
+    if base.y is not None and "y" in provided:
+        props["y"] = snapshot.y
+    if base.width is not None and "width" in provided:
+        props["width"] = snapshot.width
+    if base.height is not None and "height" in provided:
+        props["height"] = snapshot.height
+    if base.type == "text" and "text" in provided:
         props["text"] = snapshot.text
-    if base.fill_token is None:
+    if base.fill_token is None and "fill" in provided:
         props["fill"] = snapshot.fill
     if base.layout is not None:
-        layout = base.layout.model_dump(mode="json")
-        if snapshot.layout_direction in {"horizontal", "vertical"}:
-            layout["direction"] = snapshot.layout_direction
-        if snapshot.layout_gap is not None:
-            layout["gap"] = snapshot.layout_gap
-        if snapshot.layout_padding is not None:
-            layout["padding"] = snapshot.layout_padding
-        if snapshot.layout_align in {"start", "center", "end", "stretch"}:
-            layout["align"] = snapshot.layout_align
-        props["layout"] = layout
+        layout_fields = {
+            "layout_direction",
+            "layout_gap",
+            "layout_padding",
+            "layout_align",
+        }
+        if provided & layout_fields:
+            layout = base.layout.model_dump(mode="json")
+            if snapshot.layout_direction in {"horizontal", "vertical"}:
+                layout["direction"] = snapshot.layout_direction
+            if snapshot.layout_gap is not None:
+                layout["gap"] = snapshot.layout_gap
+            if snapshot.layout_padding is not None:
+                layout["padding"] = snapshot.layout_padding
+            if snapshot.layout_align in {"start", "center", "end", "stretch"}:
+                layout["align"] = snapshot.layout_align
+            props["layout"] = layout
     return props
 
 
@@ -91,12 +103,13 @@ def three_way_review(
         remote_only: list[str] = []
         same_change: list[str] = []
 
-        for key in sorted(set(base_props) | set(local_props) | set(latest_props)):
+        for key in sorted(set(base_props) | set(latest_props)):
             base_value = base_props.get(key)
-            local_value = local_props.get(key)
+            has_local = key in local_props
+            local_value = local_props.get(key, base_value)
             latest_value = latest_props.get(key)
 
-            local_changed = local_value != base_value
+            local_changed = has_local and local_value != base_value
             remote_changed = latest_value != base_value
             conflict = local_changed and remote_changed and local_value != latest_value
 
