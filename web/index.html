@@ -25,7 +25,7 @@
   </style>
 </head>
 <body>
-<header>DesignBridge <span style="opacity:.65;margin-left:8px;font-weight:500">v0.3</span></header>
+<header>DesignBridge <span style="opacity:.65;margin-left:8px;font-weight:500">v0.4</span></header>
 <main>
   <section class="panel">
     <h2>DesignBridge JSON</h2>
@@ -40,6 +40,9 @@
     <div class="actions">
       <button id="validate">Validate</button>
       <button id="preview">Preview</button>
+      <button id="save" class="secondary">Save revision</button>
+      <button id="undo" class="secondary">Undo</button>
+      <button id="redo" class="secondary">Redo</button>
     </div>
   </section>
   <section class="panel">
@@ -126,6 +129,27 @@ function acceptProposal(){
 }
 document.getElementById("validate").onclick=()=>validate().catch(e=>status.textContent="Error: "+e.message);
 document.getElementById("preview").onclick=preview;document.getElementById("propose").onclick=proposeChange;accept.onclick=acceptProposal;
+
+async function saveRevision(){
+  try{
+    const doc=await validate();
+    const res=await fetch("/api/projects/save",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({document:doc,description:"Manual save"})});
+    const data=await res.json();if(!res.ok)throw new Error(JSON.stringify(data.detail||data));
+    status.textContent="Saved revision "+data.revision+".";
+  }catch(e){status.textContent="Error: "+e.message}
+}
+async function stepRevision(direction){
+  try{
+    const doc=JSON.parse(editor.value),id=doc.document.id;
+    const res=await fetch("/api/projects/"+encodeURIComponent(id)+"/"+direction,{method:"POST"});
+    const data=await res.json();if(!res.ok)throw new Error(JSON.stringify(data.detail||data));
+    editor.value=JSON.stringify(data.document,null,2);renderDocument(data.document);
+    status.textContent=(direction==="undo"?"Undo":"Redo")+" → revision "+data.revision+".";
+  }catch(e){status.textContent="Error: "+e.message}
+}
+document.getElementById("save").onclick=saveRevision;
+document.getElementById("undo").onclick=()=>stepRevision("undo");
+document.getElementById("redo").onclick=()=>stepRevision("redo");
 preview();
 </script>
 </body>
