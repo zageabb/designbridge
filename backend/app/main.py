@@ -66,6 +66,7 @@ async def propose_design_operations(payload: dict) -> dict:
             instruction,
             base_url=payload.get("ollama_url"),
             model=payload.get("model"),
+            selection_ids=[str(item) for item in payload.get("selection_ids", [])],
         )
         preview = apply_operations(document, batch)
     except KeyError as exc:
