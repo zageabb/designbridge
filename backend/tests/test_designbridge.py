@@ -528,3 +528,32 @@ def test_penpot_push_succeeds_with_matching_revision(monkeypatch, tmp_path):
     )
     assert push.status_code == 200
     assert push.json()["revision"] == 2
+
+
+def test_penpot_current_and_status_include_revision_metadata(monkeypatch, tmp_path):
+    from app import main as main_module
+    from app.storage import DesignStore
+
+    store = DesignStore(tmp_path / "revision-awareness.db")
+    monkeypatch.setattr(main_module, "STORE", store)
+    client = TestClient(main_module.app)
+
+    saved = client.post(
+        "/api/projects/save",
+        json={"document": VALID, "description": "Review me"},
+    )
+    assert saved.status_code == 200
+
+    current = client.get("/api/penpot/projects/demo/current")
+    assert current.status_code == 200
+    body = current.json()
+    assert body["revision"] == 1
+    assert body["description"] == "Review me"
+    assert body["created_at"]
+
+    status = client.get("/api/penpot/projects/demo/status?local_revision=0")
+    assert status.status_code == 200
+    state = status.json()
+    assert state["state"] == "behind"
+    assert state["description"] == "Review me"
+    assert state["updated_at"]
