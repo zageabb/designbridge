@@ -227,9 +227,13 @@ async function applyCanonicalDefinitions(componentIds){
       document:latest.document,
       component_ids:componentIds
     },"*");
-    setRevision(latest.revision);
     currentRevision=latest.revision;
-    syncStatus.textContent="Applied canonical component definitions from revision "+latest.revision+". Existing Penpot instance overrides remain protected by Penpot.";
+    if(localRevision===latest.revision){
+      setRevision(latest.revision);
+      syncStatus.textContent="Applied canonical component definitions at revision "+latest.revision+". Existing Penpot instance overrides remain protected by Penpot.";
+    }else{
+      syncStatus.textContent="Applied component definitions from revision "+latest.revision+", but other changes remain outstanding. Penpot stays based on revision "+localRevision+".";
+    }
     await refreshStatus();
   }catch(error){
     syncStatus.textContent="Definition pull failed: "+error.message;
