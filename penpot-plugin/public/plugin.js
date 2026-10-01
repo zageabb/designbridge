@@ -43,15 +43,20 @@ function applySize(shape, node) {
   if (typeof node.y === "number") shape.y = node.y;
 }
 
-function applyLayout(board, layout) {
-  if (!layout) return;
-  const flex = board.addFlexLayout();
+function setFlexLayout(flex, layout) {
+  if (!flex || !layout) return;
   flex.dir = layout.direction === "horizontal" ? "row" : "column";
   flex.rowGap = layout.gap || 0;
   flex.columnGap = layout.gap || 0;
   flex.verticalPadding = layout.padding || 0;
   flex.horizontalPadding = layout.padding || 0;
   flex.alignItems = layout.align || "start";
+}
+
+function applyLayout(board, layout) {
+  if (!layout) return;
+  const flex = board.addFlexLayout();
+  setFlexLayout(flex, layout);
 }
 
 function tagShape(shape, node) {
@@ -196,6 +201,10 @@ function updateLinkedShapes(document) {
     if (shape.type === "text" && typeof node.text === "string") {
       shape.characters = node.text;
     }
+    if (shape.type === "board" && node.layout) {
+      const flex = shape.flex || shape.layout || null;
+      if (flex) setFlexLayout(flex, node.layout);
+    }
     tagShape(shape, node);
     updated += 1;
   }
@@ -248,6 +257,25 @@ function shapeFill(shape) {
   return null;
 }
 
+function flexSnapshot(shape) {
+  if (shape.type !== "board") return {};
+  const flex = shape.flex || shape.layout || null;
+  if (!flex) return {};
+  const direction = flex.dir === "row" ? "horizontal" : flex.dir === "column" ? "vertical" : null;
+  const gap = typeof flex.rowGap === "number" && typeof flex.columnGap === "number"
+    ? Math.max(flex.rowGap, flex.columnGap)
+    : null;
+  const paddingValues = [flex.verticalPadding, flex.horizontalPadding].filter(v => typeof v === "number");
+  const padding = paddingValues.length ? Math.max(...paddingValues) : null;
+  const align = ["start","center","end","stretch"].includes(flex.alignItems) ? flex.alignItems : null;
+  return {
+    layout_direction: direction,
+    layout_gap: gap,
+    layout_padding: padding,
+    layout_align: align
+  };
+}
+
 function serializeSelection() {
   return (penpot.selection || []).map(shape => ({
     penpot_id: shape.id,
@@ -260,7 +288,8 @@ function serializeSelection() {
     width: shape.width,
     height: shape.height,
     text: shape.type === "text" ? shape.characters : null,
-    fill: shapeFill(shape)
+    fill: shapeFill(shape),
+    ...flexSnapshot(shape)
   }));
 }
 
