@@ -678,3 +678,51 @@ def test_penpot_selective_pull_rejects_added_node(monkeypatch, tmp_path):
         json={"from_revision": 1, "node_ids": ["new-label"]},
     )
     assert response.status_code == 422
+
+
+def test_penpot_three_way_review_endpoint(monkeypatch, tmp_path):
+    from app import main as main_module
+    from app.storage import DesignStore
+
+    store = DesignStore(tmp_path / "three-way.db")
+    monkeypatch.setattr(main_module, "STORE", store)
+    client = TestClient(main_module.app)
+
+    assert client.post(
+        "/api/projects/save",
+        json={"document": VALID, "description": "initial"},
+    ).status_code == 200
+
+    changed = DesignBridgeDocument.model_validate(VALID).model_copy(deep=True)
+    changed.pages[0].children[0].children[0].text = "Changed in DesignBridge"
+    assert client.post(
+        "/api/projects/save",
+        json={
+            "document": changed.model_dump(mode="json", exclude_none=True),
+            "description": "remote title edit",
+        },
+    ).status_code == 200
+
+    response = client.post(
+        "/api/penpot/projects/demo/three-way-review",
+        json={
+            "from_revision": 1,
+            "snapshots": [
+                {
+                    "penpot_id": "shape-1",
+                    "designbridge_id": "title",
+                    "designbridge_type": "text",
+                    "name": "Title",
+                    "type": "text",
+                    "text": "Changed in Penpot",
+                }
+            ],
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["from_revision"] == 1
+    assert body["to_revision"] == 2
+    assert body["review"]["summary"]["conflict_properties"] == 1
+    detail = body["review"]["nodes"][0]["properties"]["text"]
+    assert detail["classification"] == "conflict"
