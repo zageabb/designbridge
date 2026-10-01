@@ -10,6 +10,9 @@ from .component_sync import (
     component_definition_report,
     component_instance_report,
     instance_override_changes,
+    plan_variant_switch,
+    variant_family_report,
+    variant_switch_operation,
 )
 from .design_agent import propose_operations
 from .document_reconciliation import reconcile_document
@@ -20,7 +23,7 @@ from .revision_diff import compare_documents, selective_pull_plan
 from .storage import DesignStore
 from .three_way import resolution_plan, three_way_review
 
-app = FastAPI(title="DesignBridge API", version="0.16.0")
+app = FastAPI(title="DesignBridge API", version="0.17.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -41,7 +44,7 @@ STORE = DesignStore(DATA_ROOT / "designbridge.db")
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "service": "designbridge", "version": "0.16.0"}
+    return {"status": "ok", "service": "designbridge", "version": "0.17.0"}
 
 
 @app.post("/api/validate")
@@ -194,6 +197,110 @@ def penpot_project_diff(
         "from_description": before["description"],
         "to_description": after["description"],
         "diff": compare_documents(before["document"], after["document"]),
+    }
+
+
+@app.get("/api/penpot/projects/{project_id}/variants")
+def penpot_variant_families(project_id: str) -> dict:
+    try:
+        current = STORE.load(project_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="project not found")
+
+    return {
+        "project_id": project_id,
+        "revision": current["revision"],
+        "variants": variant_family_report(current["document"]),
+    }
+
+
+@app.post("/api/penpot/projects/{project_id}/variant-switch-plan")
+def penpot_variant_switch_plan(project_id: str, payload: dict) -> dict:
+    try:
+        current = STORE.load(project_id)
+        instance_id = str(payload["instance_id"])
+        target_component_id = str(payload["target_component_id"])
+        plan = plan_variant_switch(
+            current["document"],
+            instance_id,
+            target_component_id,
+        )
+    except KeyError as exc:
+        if exc.args and exc.args[0] in {"instance_id", "target_component_id"}:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{exc.args[0]} is required",
+            ) from exc
+        raise HTTPException(status_code=404, detail="project not found") from exc
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return {
+        "project_id": project_id,
+        "revision": current["revision"],
+        "plan": plan,
+    }
+
+
+@app.post("/api/penpot/projects/{project_id}/commit-variant-switch")
+def penpot_commit_variant_switch(project_id: str, payload: dict) -> dict:
+    try:
+        current = STORE.load(project_id)
+        expected_revision = payload.get("expected_revision")
+        if expected_revision is None:
+            raise ValueError("expected_revision is required")
+        if int(expected_revision) != int(current["revision"]):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "revision_conflict",
+                    "message": "DesignBridge changed before the variant switch could be committed",
+                    "expected_revision": int(expected_revision),
+                    "current_revision": int(current["revision"]),
+                },
+            )
+
+        instance_id = str(payload["instance_id"])
+        target_component_id = str(payload["target_component_id"])
+        operation, plan = variant_switch_operation(
+            current["document"],
+            instance_id,
+            target_component_id,
+        )
+        applied = apply_operations(
+            current["document"],
+            OperationBatch(
+                description="Switch component instance variant",
+                operations=[operation],
+            ),
+        )
+        saved = STORE.save(
+            applied.document,
+            description=str(
+                payload.get("description")
+                or f"Switch {instance_id} to variant {target_component_id}"
+            ),
+        )
+    except KeyError as exc:
+        if exc.args and exc.args[0] in {"instance_id", "target_component_id"}:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{exc.args[0]} is required",
+            ) from exc
+        raise HTTPException(status_code=404, detail="project not found") from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+    except HTTPException:
+        raise
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return {
+        "project_id": project_id,
+        "revision": saved["revision"],
+        "plan": plan,
+        "document": applied.document.model_dump(mode="json", exclude_none=True),
+        "changes": applied.changes,
     }
 
 
