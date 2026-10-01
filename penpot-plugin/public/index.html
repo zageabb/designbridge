@@ -20,14 +20,16 @@
   <div class="syncbox">
     <strong>Direct sync</strong>
     <div class="muted" style="margin:5px 0 4px">Project: <span id="projectId">not linked</span></div>
-    <div class="muted" style="margin:0 0 8px">Revision: <span id="revisionState">unknown</span></div>
+    <div class="muted" style="margin:0 0 8px">Revision: <span id="revisionState">unknown</span> <span id="updateBadge" style="display:none;margin-left:6px;padding:2px 6px;border-radius:10px;background:#9b6b00;color:#fff">update available</span></div>
     <input id="apiUrl" type="text" value="http://127.0.0.1:5087" aria-label="DesignBridge API URL">
     <div class="row">
       <button id="connect">Test connection</button>
+      <button id="reviewLatest">Review latest</button>
       <button id="pullLatest">Pull latest</button>
       <button id="pushSelection">Push selection</button>
     </div>
     <div id="syncStatus" class="muted" style="margin:8px 0 0">Not connected.</div>
+    <div id="latestSummary" class="muted" style="margin:6px 0 0;display:none"></div>
   </div>
   <textarea id="json" placeholder='{"format":"designbridge", ...}'></textarea>
   <div class="row">
@@ -46,7 +48,8 @@
 <script>
 const input=document.getElementById("json"), status=document.getElementById("status"), selectionStatus=document.getElementById("selectionStatus");
 const apiUrl=document.getElementById("apiUrl"),syncStatus=document.getElementById("syncStatus"),projectIdEl=document.getElementById("projectId"),revisionState=document.getElementById("revisionState");
-let lastSelection=[],projectId=null,localRevision=null,currentRevision=null;
+const updateBadge=document.getElementById("updateBadge"),latestSummary=document.getElementById("latestSummary");
+let lastSelection=[],projectId=null,localRevision=null,currentRevision=null,statusTimer=null;
 try{
   const remembered=localStorage.getItem("designbridge:api-url");
   if(remembered)apiUrl.value=remembered;
@@ -74,12 +77,18 @@ async function refreshStatus(){
     const data=await api("/api/penpot/projects/"+encodeURIComponent(projectId)+"/status"+query);
     currentRevision=data.current_revision;
     revisionState.textContent=data.state+" · local "+(data.local_revision??"?")+" / DesignBridge "+data.current_revision;
+    updateBadge.style.display=data.state==="behind"?"inline":"none";
     if(data.state==="behind"){
-      syncStatus.textContent="DesignBridge has a newer revision. Pull latest before pushing Penpot edits.";
+      syncStatus.textContent="DesignBridge has a newer revision. Review or pull latest before pushing Penpot edits.";
+      latestSummary.style.display="block";
+      latestSummary.textContent="Latest: revision "+data.current_revision+(data.description?" · "+data.description:"");
     }else if(data.state==="in_sync"){
       syncStatus.textContent="Penpot and DesignBridge are in sync at revision "+data.current_revision+".";
+      latestSummary.style.display="none";
     }else if(data.state==="ahead"){
       syncStatus.textContent="Penpot revision is ahead of DesignBridge. Pull latest before making further changes.";
+      latestSummary.style.display="block";
+      latestSummary.textContent="Local revision is ahead of the current DesignBridge revision.";
     }
   }catch(error){
     revisionState.textContent="status unavailable";
@@ -94,6 +103,23 @@ async function testConnection(){
     await refreshStatus();
   }catch(error){syncStatus.textContent="Connection failed: "+error.message}
 }
+
+async function reviewLatest(){
+  try{
+    if(!projectId)throw new Error("This Penpot file is not linked to a DesignBridge project yet.");
+    const data=await api("/api/penpot/projects/"+encodeURIComponent(projectId)+"/current");
+    currentRevision=data.revision;
+    latestSummary.style.display="block";
+    latestSummary.textContent="Revision "+data.revision+(data.description?" · "+data.description:"")+(data.created_at?" · "+new Date(data.created_at).toLocaleString():"");
+    input.value=JSON.stringify(data.document,null,2);
+    syncStatus.textContent="Reviewing revision "+data.revision+". Penpot canvas has not been changed.";
+  }catch(error){syncStatus.textContent="Review failed: "+error.message}
+}
+function startStatusPolling(){
+  if(statusTimer)clearInterval(statusTimer);
+  statusTimer=setInterval(()=>{ if(projectId)refreshStatus(); },30000);
+}
+
 async function pullLatest(){
   try{
     if(!projectId)throw new Error("This Penpot file is not linked to a DesignBridge project yet.");
@@ -131,6 +157,7 @@ async function pushSelection(){
   }
 }
 document.getElementById("connect").addEventListener("click",testConnection);
+document.getElementById("reviewLatest").addEventListener("click",reviewLatest);
 document.getElementById("pullLatest").addEventListener("click",pullLatest);
 document.getElementById("pushSelection").addEventListener("click",pushSelection);
 
@@ -173,6 +200,7 @@ window.addEventListener("message",event=>{
     if(projectId){
       revisionState.textContent="local "+(localRevision??"?");
       refreshStatus();
+      startStatusPolling();
     }else{
       revisionState.textContent="not linked";
     }
