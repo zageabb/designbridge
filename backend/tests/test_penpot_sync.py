@@ -107,3 +107,96 @@ def test_compare_penpot_skips_unknown_designbridge_id():
         assert "no supported Penpot changes" in str(exc)
     else:
         raise AssertionError("unknown IDs should not produce operations")
+
+
+def test_compare_penpot_layout_changes():
+    payload = {
+        **VALID,
+        "pages": [
+            {
+                "id": "page",
+                "name": "Page",
+                "children": [
+                    {
+                        "id": "layout-frame",
+                        "type": "frame",
+                        "name": "Layout Frame",
+                        "layout": {
+                            "direction": "vertical",
+                            "gap": 16,
+                            "padding": 24,
+                            "align": "start",
+                        },
+                        "children": [],
+                    }
+                ],
+            }
+        ],
+    }
+    document = DesignBridgeDocument.model_validate(payload)
+    batch = compare_penpot_snapshot(
+        document,
+        [
+            PenpotShapeSnapshot(
+                designbridge_id="layout-frame",
+                type="board",
+                name="Layout Frame",
+                layout_direction="horizontal",
+                layout_gap=8,
+                layout_padding=12,
+                layout_align="center",
+            )
+        ],
+    )
+
+    operation = batch.operations[0]
+    assert operation.node_id == "layout-frame"
+    assert operation.changes["layout"] == {
+        "direction": "horizontal",
+        "gap": 8,
+        "padding": 12,
+        "align": "center",
+    }
+
+
+def test_compare_penpot_layout_ignores_absent_snapshot_fields():
+    payload = {
+        **VALID,
+        "pages": [
+            {
+                "id": "page",
+                "name": "Page",
+                "children": [
+                    {
+                        "id": "layout-frame",
+                        "type": "frame",
+                        "name": "Layout Frame",
+                        "layout": {
+                            "direction": "vertical",
+                            "gap": 16,
+                            "padding": 24,
+                            "align": "start",
+                        },
+                        "children": [],
+                    }
+                ],
+            }
+        ],
+    }
+    document = DesignBridgeDocument.model_validate(payload)
+
+    try:
+        compare_penpot_snapshot(
+            document,
+            [
+                PenpotShapeSnapshot(
+                    designbridge_id="layout-frame",
+                    type="board",
+                    name="Layout Frame",
+                )
+            ],
+        )
+    except ValueError as exc:
+        assert "no supported Penpot changes" in str(exc)
+    else:
+        raise AssertionError("missing layout snapshot fields should not create updates")
