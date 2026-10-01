@@ -171,13 +171,16 @@ function linkedShapesOnCurrentPage() {
   );
 }
 
-function updateLinkedShapes(document) {
+function updateLinkedShapes(document, nodeIds=null) {
   const nodes = indexDocumentNodes(document);
+  const allowed = nodeIds ? new Set(nodeIds) : null;
   let updated = 0;
   let missing = 0;
 
   for (const shape of linkedShapesOnCurrentPage()) {
-    const id = shape.getPluginData("designbridge:id");
+    const linkedId = shape.getPluginData("designbridge:id");
+    if (allowed && !allowed.has(linkedId)) continue;
+    const id = linkedId;
     const node = nodes.get(id);
     if (!node) {
       missing += 1;
@@ -231,7 +234,7 @@ penpot.ui.onMessage(async (message) => {
   }
   if (message?.type === "designbridge:update-linked") {
     try {
-      const result = updateLinkedShapes(message.document);
+      const result = updateLinkedShapes(message.document, message.node_ids || null);
       penpot.ui.sendMessage({ type: "designbridge:update-linked-result", ok: true, result });
       sendSelection();
     } catch (error) {
