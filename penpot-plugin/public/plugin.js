@@ -95,6 +95,34 @@ function createPrimitive(node, parent, document) {
   return shape;
 }
 
+
+function applyInstanceOverrides(instance, node) {
+  const overrides = node.overrides || {};
+  if (!Object.keys(overrides).length) return 0;
+  let updated = 0;
+
+  function walk(shape) {
+    for (const child of shape.children || []) {
+      const linkedId = child.getPluginData("designbridge:id");
+      const values = overrides[linkedId];
+      if (values) {
+        if (typeof values.name === "string") child.name = values.name;
+        if (child.type === "text" && typeof values.text === "string") {
+          child.characters = values.text;
+        }
+        if (child.type !== "text" && typeof values.fill === "string") {
+          child.fills = [{ fillColor: values.fill, fillOpacity: 1 }];
+        }
+        updated += 1;
+      }
+      walk(child);
+    }
+  }
+
+  walk(instance);
+  return updated;
+}
+
 function createNode(node, parent, document) {
   if (node.type === "instance") {
     const component = componentMap.get(node.component_id);
@@ -104,6 +132,7 @@ function createNode(node, parent, document) {
     applySize(instance, node);
     tagShape(instance, node);
     parent.appendChild(instance);
+    applyInstanceOverrides(instance, node);
     return instance;
   }
   return createPrimitive(node, parent, document);
@@ -249,6 +278,7 @@ function updateLinkedShapes(document, nodeIds=null) {
       if (flex) setFlexLayout(flex, node.layout);
     }
     tagShape(shape, node);
+    if (node.type === "instance") applyInstanceOverrides(shape, node);
     updated += 1;
   }
 
