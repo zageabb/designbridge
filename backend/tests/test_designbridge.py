@@ -320,3 +320,41 @@ def test_project_save_load_undo_redo(monkeypatch, tmp_path):
     redo = client.post("/api/projects/demo/redo")
     assert redo.status_code == 200
     assert redo.json()["revision"] == 2
+
+
+def test_penpot_compare_endpoint():
+    client = TestClient(app)
+    response = client.post(
+        "/api/penpot/compare",
+        json={
+            "document": VALID,
+            "selection": [
+                {
+                    "penpot_id": "shape-1",
+                    "designbridge_id": "title",
+                    "designbridge_type": "text",
+                    "name": "Title",
+                    "type": "text",
+                    "text": "Edited in Penpot",
+                    "width": 120,
+                    "height": 30,
+                }
+            ],
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["batch"]["operations"][0]["node_id"] == "title"
+    assert body["preview"]["document"]["pages"][0]["children"][0]["children"][0]["text"] == "Edited in Penpot"
+
+
+def test_penpot_compare_rejects_unlinked_selection():
+    client = TestClient(app)
+    response = client.post(
+        "/api/penpot/compare",
+        json={
+            "document": VALID,
+            "selection": [{"penpot_id": "shape-1", "name": "Unlinked"}],
+        },
+    )
+    assert response.status_code == 422

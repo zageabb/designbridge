@@ -22,11 +22,16 @@
   </div>
   <div class="row">
     <button id="selection" style="background:#343d45">Refresh selection</button>
+    <button id="copySelection" style="background:#343d45">Copy snapshot</button>
+  </div>
+  <div class="row">
+    <button id="updateLinked">Update linked shapes from JSON</button>
   </div>
   <div id="selectionStatus" class="muted" style="margin-top:10px">No DesignBridge selection.</div>
   <div id="status"></div>
 <script>
 const input=document.getElementById("json"), status=document.getElementById("status"), selectionStatus=document.getElementById("selectionStatus");
+let lastSelection=[];
 document.getElementById("file").addEventListener("change",async e=>{
   const file=e.target.files?.[0]; if(file) input.value=await file.text();
 });
@@ -40,13 +45,37 @@ document.getElementById("import").addEventListener("click",()=>{
 document.getElementById("selection").addEventListener("click",()=>{
   parent.postMessage({type:"designbridge:get-selection"},"*");
 });
+document.getElementById("copySelection").addEventListener("click",async()=>{
+  try{
+    await navigator.clipboard.writeText(JSON.stringify(lastSelection,null,2));
+    status.textContent="Selection snapshot copied.";
+  }catch(error){
+    status.textContent="Copy failed: "+error.message;
+  }
+});
+document.getElementById("updateLinked").addEventListener("click",()=>{
+  try{
+    const document=JSON.parse(input.value);
+    status.textContent="Updating linked shapes…";
+    parent.postMessage({type:"designbridge:update-linked",document},"*");
+  }catch(error){
+    status.textContent="Invalid JSON: "+error.message;
+  }
+});
 window.addEventListener("message",event=>{
   const message=event.data;
   if(message?.type==="designbridge:selection"){
-    const linked=(message.selection||[]).filter(item=>item.designbridge_id);
+    lastSelection=message.selection||[];
+    const linked=lastSelection.filter(item=>item.designbridge_id);
     selectionStatus.textContent=linked.length
       ? "Selected: "+linked.map(item=>item.name+" ["+item.designbridge_id+"]").join(", ")
       : "Selection has no DesignBridge-linked shapes.";
+    return;
+  }
+  if(message?.type==="designbridge:update-linked-result"){
+    status.textContent=message.ok
+      ? "Updated "+message.result.updated+" linked shape(s); "+message.result.missing+" missing from JSON."
+      : "Update failed: "+message.error;
     return;
   }
   if(message?.type!=="designbridge:import-result")return;

@@ -146,9 +146,80 @@ async function importDocument(document) {
   };
 }
 
+function indexDocumentNodes(document) {
+  const nodes = new Map();
+  function walk(node) {
+    nodes.set(node.id, node);
+    for (const child of node.children || []) walk(child);
+  }
+  for (const component of document.components || []) walk(component);
+  for (const page of document.pages || []) {
+    for (const node of page.children || []) walk(node);
+  }
+  return nodes;
+}
+
+function linkedShapesOnCurrentPage() {
+  return (penpot.currentPage?.findShapes() || []).filter(
+    shape => Boolean(shape.getPluginData("designbridge:id"))
+  );
+}
+
+function updateLinkedShapes(document) {
+  const nodes = indexDocumentNodes(document);
+  let updated = 0;
+  let missing = 0;
+
+  for (const shape of linkedShapesOnCurrentPage()) {
+    const id = shape.getPluginData("designbridge:id");
+    const node = nodes.get(id);
+    if (!node) {
+      missing += 1;
+      continue;
+    }
+
+    shape.name = node.name;
+    if (typeof node.x === "number") shape.x = node.x;
+    if (typeof node.y === "number") shape.y = node.y;
+    if (
+      typeof node.width === "number" &&
+      typeof node.height === "number" &&
+      typeof shape.resize === "function"
+    ) {
+      shape.resize(node.width, node.height);
+    }
+
+    const fill = resolveFill(node, document);
+    if (fill && shape.type !== "text") {
+      shape.fills = [{ fillColor: fill, fillOpacity: 1 }];
+    }
+    if (shape.type === "text" && typeof node.text === "string") {
+      shape.characters = node.text;
+    }
+    tagShape(shape, node);
+    updated += 1;
+  }
+
+  return { updated, missing };
+}
+
 penpot.ui.onMessage(async (message) => {
   if (message?.type === "designbridge:get-selection") {
     sendSelection();
+    return;
+  }
+  if (message?.type === "designbridge:update-linked") {
+    try {
+      const result = updateLinkedShapes(message.document);
+      penpot.ui.sendMessage({ type: "designbridge:update-linked-result", ok: true, result });
+      sendSelection();
+    } catch (error) {
+      penpot.ui.sendMessage({
+        type: "designbridge:update-linked-result",
+        ok: false,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
     return;
   }
   if (message?.type !== "designbridge:import") return;
@@ -165,6 +236,14 @@ penpot.ui.onMessage(async (message) => {
 });
 
 
+function shapeFill(shape) {
+  const fills = shape.fills;
+  if (Array.isArray(fills) && fills.length && fills[0]?.fillColor) {
+    return fills[0].fillColor;
+  }
+  return null;
+}
+
 function serializeSelection() {
   return (penpot.selection || []).map(shape => ({
     penpot_id: shape.id,
@@ -175,7 +254,9 @@ function serializeSelection() {
     x: shape.x,
     y: shape.y,
     width: shape.width,
-    height: shape.height
+    height: shape.height,
+    text: shape.type === "text" ? shape.characters : null,
+    fill: shapeFill(shape)
   }));
 }
 

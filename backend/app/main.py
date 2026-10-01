@@ -7,9 +7,10 @@ from pydantic import ValidationError
 from .design_agent import propose_operations
 from .models import DesignBridgeDocument
 from .operations import OperationBatch, apply_operations
+from .penpot_sync import PenpotShapeSnapshot, compare_penpot_snapshot
 from .storage import DesignStore
 
-app = FastAPI(title="DesignBridge API", version="0.4.0")
+app = FastAPI(title="DesignBridge API", version="0.5.0")
 ROOT = Path(__file__).resolve().parents[2]
 WEB_ROOT = ROOT / "web"
 DATA_ROOT = ROOT / "data"
@@ -18,7 +19,7 @@ STORE = DesignStore(DATA_ROOT / "designbridge.db")
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "service": "designbridge", "version": "0.4.0"}
+    return {"status": "ok", "service": "designbridge", "version": "0.5.0"}
 
 
 @app.post("/api/validate")
@@ -77,6 +78,32 @@ async def propose_design_operations(payload: dict) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"design model request failed: {exc}") from exc
+
+    return {
+        "batch": batch.model_dump(mode="json", exclude_none=True),
+        "preview": preview.model_dump(mode="json", exclude_none=True),
+    }
+
+
+@app.post("/api/penpot/compare")
+def compare_penpot(payload: dict) -> dict:
+    try:
+        document = DesignBridgeDocument.model_validate(payload["document"])
+        snapshots = [
+            PenpotShapeSnapshot.model_validate(item)
+            for item in payload.get("selection", [])
+            if item.get("designbridge_id")
+        ]
+        if not snapshots:
+            raise ValueError("no DesignBridge-linked Penpot shapes supplied")
+        batch = compare_penpot_snapshot(document, snapshots)
+        preview = apply_operations(document, batch)
+    except KeyError as exc:
+        raise HTTPException(status_code=422, detail=f"missing field: {exc.args[0]}") from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     return {
         "batch": batch.model_dump(mode="json", exclude_none=True),
