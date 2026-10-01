@@ -125,3 +125,146 @@ def test_validate_endpoint():
     response = client.post("/api/validate", json=VALID)
     assert response.status_code == 200
     assert response.json() == {"valid": True, "document_id": "demo", "pages": 1}
+
+
+def test_apply_update_node_operation():
+    client = TestClient(app)
+    payload = {
+        "document": VALID,
+        "batch": {
+            "description": "Rename title",
+            "operations": [
+                {
+                    "action": "update_node",
+                    "node_id": "title",
+                    "changes": {"text": "Updated title", "name": "Updated title"},
+                }
+            ],
+        },
+    }
+    response = client.post("/api/operations/apply", json=payload)
+    assert response.status_code == 200
+    body = response.json()
+    title = body["document"]["pages"][0]["children"][0]["children"][0]
+    assert title["text"] == "Updated title"
+    assert body["changes"][0]["target"] == "title"
+
+
+def test_apply_add_and_remove_node_operations():
+    client = TestClient(app)
+    payload = {
+        "document": VALID,
+        "batch": {
+            "operations": [
+                {
+                    "action": "add_node",
+                    "parent_id": "frame",
+                    "index": 1,
+                    "node": {
+                        "id": "subtitle",
+                        "type": "text",
+                        "name": "Subtitle",
+                        "text": "Added",
+                    },
+                },
+                {
+                    "action": "remove_node",
+                    "node_id": "card-instance",
+                },
+            ]
+        },
+    }
+    response = client.post("/api/operations/apply", json=payload)
+    assert response.status_code == 200
+    children = response.json()["document"]["pages"][0]["children"][0]["children"]
+    assert [node["id"] for node in children] == ["title", "subtitle"]
+
+
+def test_apply_move_node_operation():
+    document = {
+        **VALID,
+        "pages": [
+            {
+                "id": "page",
+                "name": "Page",
+                "children": [
+                    {
+                        "id": "left",
+                        "type": "frame",
+                        "name": "Left",
+                        "children": [
+                            {"id": "moveme", "type": "text", "name": "Move", "text": "Move"}
+                        ],
+                    },
+                    {
+                        "id": "right",
+                        "type": "frame",
+                        "name": "Right",
+                        "children": [],
+                    },
+                ],
+            }
+        ],
+    }
+    client = TestClient(app)
+    response = client.post(
+        "/api/operations/apply",
+        json={
+            "document": document,
+            "batch": {
+                "operations": [
+                    {
+                        "action": "move_node",
+                        "node_id": "moveme",
+                        "parent_id": "right",
+                        "index": 0,
+                    }
+                ]
+            },
+        },
+    )
+    assert response.status_code == 200
+    page = response.json()["document"]["pages"][0]
+    assert page["children"][0]["children"] == []
+    assert page["children"][1]["children"][0]["id"] == "moveme"
+
+
+def test_apply_token_operation():
+    client = TestClient(app)
+    response = client.post(
+        "/api/operations/apply",
+        json={
+            "document": VALID,
+            "batch": {
+                "operations": [
+                    {
+                        "action": "set_color_token",
+                        "token_name": "accent",
+                        "token_value": "#123456",
+                    }
+                ]
+            },
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["document"]["tokens"]["colors"]["accent"] == "#123456"
+
+
+def test_operation_rejects_unknown_node():
+    client = TestClient(app)
+    response = client.post(
+        "/api/operations/apply",
+        json={
+            "document": VALID,
+            "batch": {
+                "operations": [
+                    {
+                        "action": "update_node",
+                        "node_id": "missing",
+                        "changes": {"name": "Nope"},
+                    }
+                ]
+            },
+        },
+    )
+    assert response.status_code == 422
