@@ -88,3 +88,39 @@ def test_document_reconciliation_includes_document_wide_conflicts():
 
     assert result["review"]["summary"]["conflict_properties"] == 1
     assert result["review"]["nodes"][0]["node_id"] == "title"
+
+
+def test_component_copy_members_do_not_count_as_duplicate_standalone_links():
+    document = DesignBridgeDocument.model_validate(VALID)
+    snapshots = [
+        _snapshot(
+            "card-label",
+            page_id="__components__",
+            page_name="Design System",
+            name="Label",
+            text="Card",
+            component_role="main_member",
+        ),
+        _snapshot(
+            "card-instance",
+            page_id="page",
+            page_name="Page",
+            name="Card instance",
+            component_role="copy_root",
+            component_id="card",
+        ),
+        _snapshot(
+            "card-label",
+            page_id="page",
+            page_name="Page",
+            name="Label",
+            text="Instance label",
+            component_role="copy_member",
+            component_id="card",
+            component_root_designbridge_id="card-instance",
+        ),
+    ]
+
+    result = reconcile_document(document, document, snapshots)
+
+    assert "card-label" not in result["duplicate_link_ids"]
