@@ -31,6 +31,7 @@
     <div id="syncStatus" class="muted" style="margin:8px 0 0">Not connected.</div>
     <div id="latestSummary" class="muted" style="margin:6px 0 0;display:none"></div>
     <div id="diffSummary" style="margin-top:8px;display:none;border-top:1px solid #343d45;padding-top:8px"></div>
+    <div id="selectivePull" style="margin-top:8px;display:none"></div>
   </div>
   <textarea id="json" placeholder='{"format":"designbridge", ...}'></textarea>
   <div class="row">
@@ -49,8 +50,8 @@
 <script>
 const input=document.getElementById("json"), status=document.getElementById("status"), selectionStatus=document.getElementById("selectionStatus");
 const apiUrl=document.getElementById("apiUrl"),syncStatus=document.getElementById("syncStatus"),projectIdEl=document.getElementById("projectId"),revisionState=document.getElementById("revisionState");
-const updateBadge=document.getElementById("updateBadge"),latestSummary=document.getElementById("latestSummary"),diffSummary=document.getElementById("diffSummary");
-let lastSelection=[],projectId=null,localRevision=null,currentRevision=null,statusTimer=null;
+const updateBadge=document.getElementById("updateBadge"),latestSummary=document.getElementById("latestSummary"),diffSummary=document.getElementById("diffSummary"),selectivePull=document.getElementById("selectivePull");
+let lastSelection=[],projectId=null,localRevision=null,currentRevision=null,statusTimer=null,lastDiff=null;
 try{
   const remembered=localStorage.getItem("designbridge:api-url");
   if(remembered)apiUrl.value=remembered;
@@ -88,6 +89,7 @@ async function refreshStatus(){
       syncStatus.textContent="Penpot and DesignBridge are in sync at revision "+data.current_revision+".";
       latestSummary.style.display="none";
       diffSummary.style.display="none";
+      selectivePull.style.display="none";
     }else if(data.state==="ahead"){
       syncStatus.textContent="Penpot revision is ahead of DesignBridge. Pull latest before making further changes.";
       latestSummary.style.display="block";
@@ -109,6 +111,7 @@ async function testConnection(){
 
 
 function renderDiff(data){
+  lastDiff=data;
   const diff=data.diff||{}, summary=diff.summary||{};
   const parts=[
     (summary.added||0)+" added",
@@ -124,7 +127,45 @@ function renderDiff(data){
   for(const item of diff.removed||[])rows.push("<div>− <strong>"+item.node_id+"</strong> · removed</div>");
   diffSummary.style.display="block";
   diffSummary.innerHTML="<div class='muted' style='margin:0 0 6px'>Changes: "+parts.join(" · ")+"</div>"+(rows.slice(0,20).join("")||"<div>No node-level changes.</div>");
+  const selectable=(diff.changed||[]).filter(item=>!(item.properties||{}).scope);
+  if(selectable.length){
+    selectivePull.style.display="block";
+    selectivePull.innerHTML=
+      "<div class='muted' style='margin-bottom:6px'>Selective pull</div>"+
+      selectable.map(item=>"<label style='display:block;margin:4px 0'><input type='checkbox' class='pullNode' value='"+item.node_id+"'> "+item.node_id+" · "+Object.keys(item.properties||{}).join(", ")+"</label>").join("")+
+      "<button id='pullSelected' style='margin-top:8px'>Pull selected changes</button>";
+    document.getElementById("pullSelected").onclick=pullSelectedChanges;
+  }else{
+    selectivePull.style.display="none";
+  }
 }
+
+async function pullSelectedChanges(){
+  try{
+    if(!projectId||localRevision==null)throw new Error("A linked DesignBridge revision is required.");
+    const nodeIds=[...document.querySelectorAll(".pullNode:checked")].map(el=>el.value);
+    if(!nodeIds.length)throw new Error("Select at least one changed node.");
+    const data=await api(
+      "/api/penpot/projects/"+encodeURIComponent(projectId)+"/selective-pull",
+      {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({from_revision:localRevision,node_ids:nodeIds})}
+    );
+    const latest=await api("/api/penpot/projects/"+encodeURIComponent(projectId)+"/current");
+    input.value=JSON.stringify(latest.document,null,2);
+    parent.postMessage({type:"designbridge:update-linked",document:latest.document,node_ids:data.selected_node_ids},"*");
+    if(data.can_advance_revision){
+      setRevision(data.to_revision);
+      localRevision=data.to_revision;
+      syncStatus.textContent="Selected changes fully reconciled revision "+data.to_revision+".";
+    }else{
+      syncStatus.textContent="Selected changes applied. Other changes remain outstanding, so Penpot stays on revision "+localRevision+".";
+    }
+    await refreshStatus();
+    await reviewDiff();
+  }catch(error){
+    syncStatus.textContent="Selective pull failed: "+error.message;
+  }
+}
+
 async function reviewDiff(){
   if(!projectId||localRevision==null)return;
   const data=await api("/api/penpot/projects/"+encodeURIComponent(projectId)+"/diff?from_revision="+encodeURIComponent(localRevision));

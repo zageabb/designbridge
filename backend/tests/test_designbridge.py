@@ -605,3 +605,76 @@ def test_penpot_revision_diff_endpoint(monkeypatch, tmp_path):
     assert body["diff"]["summary"]["changed"] == 1
     assert body["diff"]["changed"][0]["node_id"] == "title"
     assert "text" in body["diff"]["changed"][0]["properties"]
+
+
+def test_penpot_selective_pull_endpoint(monkeypatch, tmp_path):
+    from app import main as main_module
+    from app.storage import DesignStore
+
+    store = DesignStore(tmp_path / "selective-pull.db")
+    monkeypatch.setattr(main_module, "STORE", store)
+    client = TestClient(main_module.app)
+
+    assert client.post(
+        "/api/projects/save",
+        json={"document": VALID, "description": "initial"},
+    ).status_code == 200
+
+    changed = DesignBridgeDocument.model_validate(VALID).model_copy(deep=True)
+    changed.pages[0].children[0].children[0].text = "Latest title"
+    changed.pages[0].children[0].name = "Latest frame"
+
+    assert client.post(
+        "/api/projects/save",
+        json={
+            "document": changed.model_dump(mode="json", exclude_none=True),
+            "description": "two changes",
+        },
+    ).status_code == 200
+
+    partial = client.post(
+        "/api/penpot/projects/demo/selective-pull",
+        json={"from_revision": 1, "node_ids": ["title"]},
+    )
+    assert partial.status_code == 200
+    body = partial.json()
+    assert body["from_revision"] == 1
+    assert body["to_revision"] == 2
+    assert body["selected_node_ids"] == ["title"]
+    assert body["remaining_changed_node_ids"] == ["frame"]
+    assert body["can_advance_revision"] is False
+    assert body["selected"][0]["node"]["text"] == "Latest title"
+
+    full = client.post(
+        "/api/penpot/projects/demo/selective-pull",
+        json={"from_revision": 1, "node_ids": ["frame", "title"]},
+    )
+    assert full.status_code == 200
+    assert full.json()["can_advance_revision"] is True
+
+
+def test_penpot_selective_pull_rejects_added_node(monkeypatch, tmp_path):
+    from app import main as main_module
+    from app.storage import DesignStore
+
+    store = DesignStore(tmp_path / "selective-pull-added.db")
+    monkeypatch.setattr(main_module, "STORE", store)
+    client = TestClient(main_module.app)
+
+    client.post("/api/projects/save", json={"document": VALID, "description": "initial"})
+    changed = DesignBridgeDocument.model_validate(VALID).model_copy(deep=True)
+    changed.pages[0].children[0].children.append(
+        type(changed.pages[0].children[0].children[0]).model_validate(
+            {"id": "new-label", "type": "text", "name": "New label", "text": "New"}
+        )
+    )
+    client.post(
+        "/api/projects/save",
+        json={"document": changed.model_dump(mode="json", exclude_none=True), "description": "add node"},
+    )
+
+    response = client.post(
+        "/api/penpot/projects/demo/selective-pull",
+        json={"from_revision": 1, "node_ids": ["new-label"]},
+    )
+    assert response.status_code == 422
