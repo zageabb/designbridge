@@ -9,9 +9,10 @@ from .design_agent import propose_operations
 from .models import DesignBridgeDocument
 from .operations import OperationBatch, apply_operations
 from .penpot_sync import PenpotShapeSnapshot, compare_penpot_snapshot
+from .revision_diff import compare_documents
 from .storage import DesignStore
 
-app = FastAPI(title="DesignBridge API", version="0.9.0")
+app = FastAPI(title="DesignBridge API", version="0.10.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -32,7 +33,7 @@ STORE = DesignStore(DATA_ROOT / "designbridge.db")
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "service": "designbridge", "version": "0.9.0"}
+    return {"status": "ok", "service": "designbridge", "version": "0.10.0"}
 
 
 @app.post("/api/validate")
@@ -163,6 +164,28 @@ def penpot_project_status(project_id: str, local_revision: int | None = None) ->
         "state": state,
         "updated_at": current["created_at"],
         "description": current["description"],
+    }
+
+
+@app.get("/api/penpot/projects/{project_id}/diff")
+def penpot_project_diff(
+    project_id: str,
+    from_revision: int,
+    to_revision: int | None = None,
+) -> dict:
+    try:
+        before = STORE.load(project_id, from_revision)
+        after = STORE.load(project_id, to_revision)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="project or revision not found")
+
+    return {
+        "project_id": project_id,
+        "from_revision": before["revision"],
+        "to_revision": after["revision"],
+        "from_description": before["description"],
+        "to_description": after["description"],
+        "diff": compare_documents(before["document"], after["document"]),
     }
 
 
