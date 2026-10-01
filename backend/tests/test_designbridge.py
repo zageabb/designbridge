@@ -857,3 +857,107 @@ def test_penpot_document_reconciliation_endpoint(monkeypatch, tmp_path):
     assert body["reconciliation"]["summary"]["expected_nodes"] == 5
     assert body["reconciliation"]["summary"]["linked_nodes"] == 1
     assert body["reconciliation"]["summary"]["missing_nodes"] == 4
+
+
+def test_penpot_component_report_endpoint(monkeypatch, tmp_path):
+    from app import main as main_module
+    from app.storage import DesignStore
+
+    store = DesignStore(tmp_path / "component-report.db")
+    monkeypatch.setattr(main_module, "STORE", store)
+    client = TestClient(main_module.app)
+    client.post("/api/projects/save", json={"document": VALID, "description": "initial"})
+
+    response = client.post(
+        "/api/penpot/projects/demo/component-report",
+        json={
+            "snapshots": [
+                {
+                    "designbridge_id": "card-instance",
+                    "designbridge_type": "instance",
+                    "component_role": "copy_root",
+                    "component_id": "card",
+                    "component_root_designbridge_id": "card-instance",
+                    "name": "Card instance",
+                },
+                {
+                    "designbridge_id": "card-label",
+                    "designbridge_type": "text",
+                    "component_role": "copy_member",
+                    "component_id": "card",
+                    "component_root_designbridge_id": "card-instance",
+                    "name": "Label",
+                    "text": "Instance label",
+                },
+            ]
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["report"]["summary"]["linked_instances"] == 1
+    assert body["report"]["summary"]["overrides_out_of_sync"] == 1
+
+
+def test_penpot_capture_instance_overrides_endpoint(monkeypatch, tmp_path):
+    from app import main as main_module
+    from app.storage import DesignStore
+
+    store = DesignStore(tmp_path / "component-capture.db")
+    monkeypatch.setattr(main_module, "STORE", store)
+    client = TestClient(main_module.app)
+    client.post("/api/projects/save", json={"document": VALID, "description": "initial"})
+
+    response = client.post(
+        "/api/penpot/projects/demo/capture-instance-overrides",
+        json={
+            "expected_revision": 1,
+            "instance_ids": ["card-instance"],
+            "snapshots": [
+                {
+                    "designbridge_id": "card-instance",
+                    "designbridge_type": "instance",
+                    "component_role": "copy_root",
+                    "component_id": "card",
+                    "component_root_designbridge_id": "card-instance",
+                    "name": "Card instance",
+                },
+                {
+                    "designbridge_id": "card-label",
+                    "designbridge_type": "text",
+                    "component_role": "copy_member",
+                    "component_id": "card",
+                    "component_root_designbridge_id": "card-instance",
+                    "name": "Label",
+                    "text": "Instance label",
+                },
+            ],
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["changed"] is True
+    assert body["revision"] == 2
+    instance = body["document"]["pages"][0]["children"][0]["children"][1]
+    assert instance["overrides"] == {
+        "card-label": {"text": "Instance label"}
+    }
+
+
+def test_penpot_capture_instance_overrides_blocks_stale_revision(monkeypatch, tmp_path):
+    from app import main as main_module
+    from app.storage import DesignStore
+
+    store = DesignStore(tmp_path / "component-stale.db")
+    monkeypatch.setattr(main_module, "STORE", store)
+    client = TestClient(main_module.app)
+    client.post("/api/projects/save", json={"document": VALID, "description": "initial"})
+
+    response = client.post(
+        "/api/penpot/projects/demo/capture-instance-overrides",
+        json={
+            "expected_revision": 0,
+            "instance_ids": ["card-instance"],
+            "snapshots": [],
+        },
+    )
+    assert response.status_code == 409
