@@ -50,6 +50,7 @@ class DesignNode(BaseModel):
     fill: str | None = None
     fill_token: str | None = None
     component_id: str | None = None
+    overrides: dict[str, dict[str, str | float | bool | None]] = Field(default_factory=dict)
     layout: Layout | None = None
     children: list["DesignNode"] = Field(default_factory=list)
 
@@ -61,6 +62,18 @@ class DesignNode(BaseModel):
             raise ValueError("instance nodes require component_id")
         if self.type == "instance" and self.children:
             raise ValueError("instance nodes cannot contain children")
+        if self.type != "instance" and self.overrides:
+            raise ValueError("only instance nodes may define overrides")
+        allowed_override_properties = {"text", "name", "fill"}
+        for child_id, values in self.overrides.items():
+            if not child_id:
+                raise ValueError("instance override child IDs cannot be empty")
+            unsupported = set(values) - allowed_override_properties
+            if unsupported:
+                raise ValueError(
+                    "unsupported instance override properties: "
+                    + ", ".join(sorted(unsupported))
+                )
         return self
 
 
