@@ -27,6 +27,7 @@
       <button id="reviewLatest">Review latest</button>
       <button id="checkConflicts">Check local conflicts</button>
       <button id="reviewDocument">Review whole document</button>
+      <button id="reviewComponents">Review components</button>
       <button id="pullLatest">Pull latest</button>
       <button id="pushSelection">Push selection</button>
     </div>
@@ -36,6 +37,7 @@
     <div id="selectivePull" style="margin-top:8px;display:none"></div>
     <div id="conflictSummary" style="margin-top:8px;display:none;border-top:1px solid #343d45;padding-top:8px"></div>
     <div id="documentSummary" style="margin-top:8px;display:none;border-top:1px solid #343d45;padding-top:8px"></div>
+    <div id="componentSummary" style="margin-top:8px;display:none;border-top:1px solid #343d45;padding-top:8px"></div>
   </div>
   <textarea id="json" placeholder='{"format":"designbridge", ...}'></textarea>
   <div class="row">
@@ -54,7 +56,7 @@
 <script>
 const input=document.getElementById("json"), status=document.getElementById("status"), selectionStatus=document.getElementById("selectionStatus");
 const apiUrl=document.getElementById("apiUrl"),syncStatus=document.getElementById("syncStatus"),projectIdEl=document.getElementById("projectId"),revisionState=document.getElementById("revisionState");
-const updateBadge=document.getElementById("updateBadge"),latestSummary=document.getElementById("latestSummary"),diffSummary=document.getElementById("diffSummary"),selectivePull=document.getElementById("selectivePull"),conflictSummary=document.getElementById("conflictSummary"),documentSummary=document.getElementById("documentSummary");
+const updateBadge=document.getElementById("updateBadge"),latestSummary=document.getElementById("latestSummary"),diffSummary=document.getElementById("diffSummary"),selectivePull=document.getElementById("selectivePull"),conflictSummary=document.getElementById("conflictSummary"),documentSummary=document.getElementById("documentSummary"),componentSummary=document.getElementById("componentSummary");
 let lastSelection=[],projectId=null,localRevision=null,currentRevision=null,statusTimer=null,lastDiff=null,linkedSnapshotResolver=null,documentSnapshotResolver=null,lastLinkedSnapshots=[];
 try{
   const remembered=localStorage.getItem("designbridge:api-url");
@@ -146,6 +148,66 @@ function renderDiff(data){
 }
 
 
+
+
+function renderComponentReport(data){
+  const report=data.report||{}, summary=report.summary||{}, rows=[];
+  for(const item of report.instances||[]){
+    rows.push("<div style='margin:5px 0'><strong>"+item.instance_id+"</strong> · "+item.status+" · component "+(item.component_id||"?")+
+      (item.overrides_match===false?"<br><span class='muted'>safe overrides differ from canonical</span>":"")+"</div>");
+  }
+  const capture=(report.overrides_out_of_sync_ids||[]);
+  componentSummary.style.display="block";
+  componentSummary.innerHTML=
+    "<div class='muted' style='margin:0 0 6px'>Components: "+(summary.linked_instances||0)+"/"+(summary.expected_instances||0)+" linked · "+
+    (summary.detached_instances||0)+" detached · "+(summary.swapped_instances||0)+" swapped · "+(summary.overrides_out_of_sync||0)+" override set(s) differ</div>"+
+    (rows.join("")||"<div>No component instances in the canonical document.</div>")+
+    (capture.length?"<button id='captureOverrides' style='margin-top:8px'>Capture safe overrides</button>":"");
+  const button=document.getElementById("captureOverrides");
+  if(button)button.onclick=()=>captureSafeOverrides(capture);
+}
+async function reviewComponents(){
+  try{
+    if(!projectId||localRevision==null)throw new Error("A linked DesignBridge revision is required.");
+    const snapshot=await requestDocumentSnapshot();
+    lastLinkedSnapshots=snapshot.snapshots||[];
+    const data=await api(
+      "/api/penpot/projects/"+encodeURIComponent(projectId)+"/component-report",
+      {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({snapshots:lastLinkedSnapshots})}
+    );
+    renderComponentReport(data);
+    const s=data.report?.summary||{};
+    syncStatus.textContent="Component review complete: "+(s.linked_instances||0)+"/"+(s.expected_instances||0)+" instances linked.";
+  }catch(error){
+    syncStatus.textContent="Component review failed: "+error.message;
+  }
+}
+async function captureSafeOverrides(instanceIds){
+  try{
+    if(!projectId||localRevision==null)throw new Error("A linked DesignBridge revision is required.");
+    const data=await api(
+      "/api/penpot/projects/"+encodeURIComponent(projectId)+"/capture-instance-overrides",
+      {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
+        expected_revision:localRevision,
+        snapshots:lastLinkedSnapshots,
+        instance_ids:instanceIds,
+        description:"Capture Penpot component instance overrides"
+      })}
+    );
+    input.value=JSON.stringify(data.document,null,2);
+    if(data.changed){
+      setRevision(data.revision);
+      currentRevision=data.revision;
+      syncStatus.textContent="Captured safe instance overrides in revision "+data.revision+".";
+    }else{
+      syncStatus.textContent="Component overrides already match DesignBridge.";
+    }
+    await refreshStatus();
+    await reviewComponents();
+  }catch(error){
+    syncStatus.textContent="Override capture failed: "+error.message;
+  }
+}
 
 function requestDocumentSnapshot(){
   return new Promise((resolve,reject)=>{
@@ -367,6 +429,7 @@ document.getElementById("connect").addEventListener("click",testConnection);
 document.getElementById("reviewLatest").addEventListener("click",reviewLatest);
 document.getElementById("checkConflicts").addEventListener("click",checkLocalConflicts);
 document.getElementById("reviewDocument").addEventListener("click",reviewWholeDocument);
+document.getElementById("reviewComponents").addEventListener("click",reviewComponents);
 document.getElementById("pullLatest").addEventListener("click",pullLatest);
 document.getElementById("pushSelection").addEventListener("click",pushSelection);
 
