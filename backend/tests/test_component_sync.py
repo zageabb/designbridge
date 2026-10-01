@@ -98,3 +98,118 @@ def test_instance_override_changes_rejects_detached_instance():
             [{**_root(), "component_role": "basic"}],
             ["card-instance"],
         )
+
+
+def test_component_definition_report_detects_main_text_change():
+    from app.component_sync import component_definition_report
+
+    document = DesignBridgeDocument.model_validate(VALID)
+    snapshots = [
+        {
+            "designbridge_id": "card",
+            "designbridge_type": "component",
+            "component_role": "main_root",
+            "component_id": "card",
+            "name": "Card",
+        },
+        {
+            "designbridge_id": "card-label",
+            "designbridge_type": "text",
+            "component_role": "main_member",
+            "component_id": "card",
+            "name": "Label",
+            "text": "Changed main label",
+        },
+    ]
+
+    report = component_definition_report(document, snapshots)
+
+    assert report["summary"]["changed"] == 1
+    component = report["components"][0]
+    assert component["component_id"] == "card"
+    assert component["child_changes"] == {
+        "card-label": {"text": "Changed main label"}
+    }
+
+
+def test_component_definition_report_preserves_instance_override_visibility():
+    from app.component_sync import component_definition_report
+
+    document = DesignBridgeDocument.model_validate(VALID).model_copy(deep=True)
+    instance = document.pages[0].children[0].children[1]
+    instance.overrides = {
+        "card-label": {"text": "Instance-specific label"}
+    }
+
+    snapshots = [
+        {
+            "designbridge_id": "card",
+            "designbridge_type": "component",
+            "component_role": "main_root",
+            "component_id": "card",
+            "name": "Card",
+        },
+        {
+            "designbridge_id": "card-label",
+            "designbridge_type": "text",
+            "component_role": "main_member",
+            "component_id": "card",
+            "name": "Label",
+            "text": "Changed main label",
+        },
+    ]
+
+    report = component_definition_report(document, snapshots)
+    protected = report["components"][0]["protected_instance_overrides"]
+
+    assert protected == {
+        "card-instance": {
+            "card-label": ["text"]
+        }
+    }
+
+
+def test_component_definition_operations_only_touch_changed_main_nodes():
+    from app.component_sync import component_definition_operations
+
+    document = DesignBridgeDocument.model_validate(VALID)
+    snapshots = [
+        {
+            "designbridge_id": "card",
+            "designbridge_type": "component",
+            "component_role": "main_root",
+            "component_id": "card",
+            "name": "Renamed Card",
+        },
+        {
+            "designbridge_id": "card-label",
+            "designbridge_type": "text",
+            "component_role": "main_member",
+            "component_id": "card",
+            "name": "Label",
+            "text": "Changed main label",
+        },
+    ]
+
+    operations = component_definition_operations(
+        document,
+        snapshots,
+        ["card"],
+    )
+
+    assert [operation.node_id for operation in operations] == ["card", "card-label"]
+    assert operations[0].changes == {"name": "Renamed Card"}
+    assert operations[1].changes == {"text": "Changed main label"}
+
+
+def test_component_definition_operations_reject_missing_main():
+    import pytest
+    from app.component_sync import component_definition_operations
+
+    document = DesignBridgeDocument.model_validate(VALID)
+    with pytest.raises(ValueError, match="missing"):
+        component_definition_operations(
+            document,
+            [],
+            ["card"],
+        )

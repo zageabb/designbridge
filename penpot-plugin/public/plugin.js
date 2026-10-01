@@ -216,6 +216,48 @@ function linkedShapesAcrossDocument() {
 }
 
 
+
+function componentNodeIndex(document) {
+  const result = new Map();
+  function walk(node, componentId) {
+    result.set(node.id, { node, componentId });
+    for (const child of node.children || []) walk(child, componentId);
+  }
+  for (const component of document.components || []) {
+    walk(component, component.id);
+  }
+  return result;
+}
+
+function updateComponentDefinitions(document, componentIds) {
+  const wanted = new Set(componentIds || []);
+  const index = componentNodeIndex(document);
+  let updated = 0;
+
+  for (const item of linkedShapesAcrossDocument()) {
+    const shape = item.shape;
+    const meta = componentMetadata(shape);
+    if (!["main_root", "main_member"].includes(meta.component_role)) continue;
+
+    const linkedId = shape.getPluginData("designbridge:id");
+    const entry = index.get(linkedId);
+    if (!entry || (wanted.size && !wanted.has(entry.componentId))) continue;
+
+    const node = entry.node;
+    shape.name = node.name;
+    if (shape.type === "text" && typeof node.text === "string") {
+      shape.characters = node.text;
+    }
+    const fill = resolveFill(node, document);
+    if (fill && shape.type !== "text") {
+      shape.fills = [{ fillColor: fill, fillOpacity: 1 }];
+    }
+    updated += 1;
+  }
+
+  return { updated };
+}
+
 function applyPropertyUpdates(updates) {
   const byId = new Map(linkedShapesAcrossDocument().map(item => [item.shape.getPluginData("designbridge:id"), item.shape]));
   let updated = 0;
@@ -322,6 +364,27 @@ penpot.ui.onMessage(async (message) => {
     if (penpot.currentFile && Number.isFinite(Number(message.revision))) {
       penpot.currentFile.setPluginData("designbridge:revision", String(Number(message.revision)));
       sendContext();
+    }
+    return;
+  }
+  if (message?.type === "designbridge:update-component-definitions") {
+    try {
+      const result = updateComponentDefinitions(
+        message.document,
+        message.component_ids || []
+      );
+      penpot.ui.sendMessage({
+        type: "designbridge:component-definition-update-result",
+        ok: true,
+        result
+      });
+      sendSelection();
+    } catch (error) {
+      penpot.ui.sendMessage({
+        type: "designbridge:component-definition-update-result",
+        ok: false,
+        error: error instanceof Error ? error.message : String(error)
+      });
     }
     return;
   }
