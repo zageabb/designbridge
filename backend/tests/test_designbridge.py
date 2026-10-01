@@ -419,3 +419,111 @@ def test_direct_penpot_push_requires_linked_shape(monkeypatch, tmp_path):
         json={"selection": [{"penpot_id": "shape-1", "name": "Unlinked"}]},
     )
     assert response.status_code == 422
+
+
+def test_penpot_status_and_revision_conflict(monkeypatch, tmp_path):
+    from app import main as main_module
+    from app.storage import DesignStore
+
+    store = DesignStore(tmp_path / "conflict-sync.db")
+    monkeypatch.setattr(main_module, "STORE", store)
+    client = TestClient(main_module.app)
+
+    first = client.post(
+        "/api/projects/save",
+        json={"document": VALID, "description": "initial"},
+    )
+    assert first.status_code == 200
+    assert first.json()["revision"] == 1
+
+    status = client.get("/api/penpot/projects/demo/status?local_revision=1")
+    assert status.status_code == 200
+    assert status.json()["state"] == "in_sync"
+    assert status.json()["current_revision"] == 1
+
+    changed = {**VALID}
+    changed["pages"] = [
+        {
+            **VALID["pages"][0],
+            "children": [
+                {
+                    **VALID["pages"][0]["children"][0],
+                    "children": [
+                        {
+                            **VALID["pages"][0]["children"][0]["children"][0],
+                            "text": "Changed elsewhere",
+                        },
+                        VALID["pages"][0]["children"][0]["children"][1],
+                    ],
+                }
+            ],
+        }
+    ]
+    second = client.post(
+        "/api/projects/save",
+        json={"document": changed, "description": "external change"},
+    )
+    assert second.status_code == 200
+    assert second.json()["revision"] == 2
+
+    behind = client.get("/api/penpot/projects/demo/status?local_revision=1")
+    assert behind.status_code == 200
+    assert behind.json()["state"] == "behind"
+    assert behind.json()["current_revision"] == 2
+
+    conflict = client.post(
+        "/api/penpot/projects/demo/selection",
+        json={
+            "expected_revision": 1,
+            "selection": [
+                {
+                    "penpot_id": "shape-1",
+                    "designbridge_id": "title",
+                    "designbridge_type": "text",
+                    "name": "Title",
+                    "type": "text",
+                    "text": "Stale Penpot edit",
+                }
+            ],
+        },
+    )
+    assert conflict.status_code == 409
+    detail = conflict.json()["detail"]
+    assert detail["code"] == "revision_conflict"
+    assert detail["expected_revision"] == 1
+    assert detail["current_revision"] == 2
+
+
+def test_penpot_push_succeeds_with_matching_revision(monkeypatch, tmp_path):
+    from app import main as main_module
+    from app.storage import DesignStore
+
+    store = DesignStore(tmp_path / "matching-sync.db")
+    monkeypatch.setattr(main_module, "STORE", store)
+    client = TestClient(main_module.app)
+
+    save = client.post(
+        "/api/projects/save",
+        json={"document": VALID, "description": "initial"},
+    )
+    assert save.status_code == 200
+    assert save.json()["revision"] == 1
+
+    push = client.post(
+        "/api/penpot/projects/demo/selection",
+        json={
+            "expected_revision": 1,
+            "selection": [
+                {
+                    "penpot_id": "shape-1",
+                    "designbridge_id": "title",
+                    "designbridge_type": "text",
+                    "name": "Title",
+                    "type": "text",
+                    "text": "Fresh Penpot edit",
+                }
+            ],
+        },
+    )
+    assert push.status_code == 200
+    assert push.json()["revision"] == 2
