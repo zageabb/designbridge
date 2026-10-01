@@ -23,6 +23,10 @@ class PenpotShapeSnapshot(BaseModel):
     height: float | None = None
     text: str | None = None
     fill: str | None = None
+    layout_direction: str | None = None
+    layout_gap: float | None = None
+    layout_padding: float | None = None
+    layout_align: str | None = None
 
 
 def _node_index(document: DesignBridgeDocument) -> dict[str, DesignNode]:
@@ -81,6 +85,31 @@ def compare_penpot_snapshot(
             and snapshot.fill != node.fill
         ):
             changes["fill"] = snapshot.fill
+
+        if node.layout is not None:
+            layout_changes = node.layout.model_dump(mode="json")
+            changed_layout = False
+
+            if snapshot.layout_direction in {"horizontal", "vertical"}:
+                if snapshot.layout_direction != node.layout.direction:
+                    layout_changes["direction"] = snapshot.layout_direction
+                    changed_layout = True
+
+            if snapshot.layout_gap is not None and _different(node.layout.gap, snapshot.layout_gap):
+                layout_changes["gap"] = snapshot.layout_gap
+                changed_layout = True
+
+            if snapshot.layout_padding is not None and _different(node.layout.padding, snapshot.layout_padding):
+                layout_changes["padding"] = snapshot.layout_padding
+                changed_layout = True
+
+            if snapshot.layout_align in {"start", "center", "end", "stretch"}:
+                if snapshot.layout_align != node.layout.align:
+                    layout_changes["align"] = snapshot.layout_align
+                    changed_layout = True
+
+            if changed_layout:
+                changes["layout"] = layout_changes
 
         if changes:
             operations.append(
