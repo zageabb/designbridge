@@ -25,6 +25,7 @@
     <div class="row">
       <button id="connect">Test connection</button>
       <button id="reviewLatest">Review latest</button>
+      <button id="checkConflicts">Check local conflicts</button>
       <button id="pullLatest">Pull latest</button>
       <button id="pushSelection">Push selection</button>
     </div>
@@ -32,6 +33,7 @@
     <div id="latestSummary" class="muted" style="margin:6px 0 0;display:none"></div>
     <div id="diffSummary" style="margin-top:8px;display:none;border-top:1px solid #343d45;padding-top:8px"></div>
     <div id="selectivePull" style="margin-top:8px;display:none"></div>
+    <div id="conflictSummary" style="margin-top:8px;display:none;border-top:1px solid #343d45;padding-top:8px"></div>
   </div>
   <textarea id="json" placeholder='{"format":"designbridge", ...}'></textarea>
   <div class="row">
@@ -50,8 +52,8 @@
 <script>
 const input=document.getElementById("json"), status=document.getElementById("status"), selectionStatus=document.getElementById("selectionStatus");
 const apiUrl=document.getElementById("apiUrl"),syncStatus=document.getElementById("syncStatus"),projectIdEl=document.getElementById("projectId"),revisionState=document.getElementById("revisionState");
-const updateBadge=document.getElementById("updateBadge"),latestSummary=document.getElementById("latestSummary"),diffSummary=document.getElementById("diffSummary"),selectivePull=document.getElementById("selectivePull");
-let lastSelection=[],projectId=null,localRevision=null,currentRevision=null,statusTimer=null,lastDiff=null;
+const updateBadge=document.getElementById("updateBadge"),latestSummary=document.getElementById("latestSummary"),diffSummary=document.getElementById("diffSummary"),selectivePull=document.getElementById("selectivePull"),conflictSummary=document.getElementById("conflictSummary");
+let lastSelection=[],projectId=null,localRevision=null,currentRevision=null,statusTimer=null,lastDiff=null,linkedSnapshotResolver=null;
 try{
   const remembered=localStorage.getItem("designbridge:api-url");
   if(remembered)apiUrl.value=remembered;
@@ -90,6 +92,7 @@ async function refreshStatus(){
       latestSummary.style.display="none";
       diffSummary.style.display="none";
       selectivePull.style.display="none";
+      conflictSummary.style.display="none";
     }else if(data.state==="ahead"){
       syncStatus.textContent="Penpot revision is ahead of DesignBridge. Pull latest before making further changes.";
       latestSummary.style.display="block";
@@ -137,6 +140,53 @@ function renderDiff(data){
     document.getElementById("pullSelected").onclick=pullSelectedChanges;
   }else{
     selectivePull.style.display="none";
+  }
+}
+
+
+function requestLinkedSnapshot(){
+  return new Promise((resolve,reject)=>{
+    linkedSnapshotResolver=resolve;
+    parent.postMessage({type:"designbridge:get-linked-snapshot"},"*");
+    setTimeout(()=>{
+      if(linkedSnapshotResolver){
+        linkedSnapshotResolver=null;
+        reject(new Error("Timed out waiting for Penpot linked-shape snapshot."));
+      }
+    },3000);
+  });
+}
+function renderThreeWay(data){
+  const review=data.review||{}, summary=review.summary||{}, rows=[];
+  for(const node of review.nodes||[]){
+    for(const [property,detail] of Object.entries(node.properties||{})){
+      if(detail.classification==="conflict"){
+        rows.push("<div style='margin:4px 0'><strong>"+node.node_id+"."+property+"</strong> · conflict<br><span class='muted'>base: "+JSON.stringify(detail.base)+" · Penpot: "+JSON.stringify(detail.local)+" · DesignBridge: "+JSON.stringify(detail.latest)+"</span></div>");
+      }else if(detail.classification==="local_only"){
+        rows.push("<div style='margin:4px 0'>"+node.node_id+"."+property+" · local Penpot edit</div>");
+      }
+    }
+  }
+  conflictSummary.style.display="block";
+  conflictSummary.innerHTML=
+    "<div class='muted' style='margin:0 0 6px'>Three-way review: "+(summary.conflict_properties||0)+" conflict(s) · "+(summary.local_only_properties||0)+" local-only edit(s)</div>"+
+    (rows.slice(0,24).join("")||"<div>No local edits or conflicting properties detected on linked shapes on this page.</div>");
+}
+async function checkLocalConflicts(){
+  try{
+    if(!projectId||localRevision==null)throw new Error("A linked DesignBridge revision is required.");
+    const snapshots=await requestLinkedSnapshot();
+    const data=await api(
+      "/api/penpot/projects/"+encodeURIComponent(projectId)+"/three-way-review",
+      {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({from_revision:localRevision,snapshots})}
+    );
+    renderThreeWay(data);
+    const conflicts=data.review?.summary?.conflict_properties||0;
+    syncStatus.textContent=conflicts
+      ? "Review required: "+conflicts+" property conflict(s) would overwrite local Penpot edits."
+      : "Three-way review found no conflicting local Penpot edits.";
+  }catch(error){
+    syncStatus.textContent="Conflict review failed: "+error.message;
   }
 }
 
@@ -227,6 +277,7 @@ async function pushSelection(){
 }
 document.getElementById("connect").addEventListener("click",testConnection);
 document.getElementById("reviewLatest").addEventListener("click",reviewLatest);
+document.getElementById("checkConflicts").addEventListener("click",checkLocalConflicts);
 document.getElementById("pullLatest").addEventListener("click",pullLatest);
 document.getElementById("pushSelection").addEventListener("click",pushSelection);
 
@@ -272,6 +323,14 @@ window.addEventListener("message",event=>{
       startStatusPolling();
     }else{
       revisionState.textContent="not linked";
+    }
+    return;
+  }
+  if(message?.type==="designbridge:linked-snapshot"){
+    if(linkedSnapshotResolver){
+      const resolve=linkedSnapshotResolver;
+      linkedSnapshotResolver=null;
+      resolve(message.snapshots||[]);
     }
     return;
   }

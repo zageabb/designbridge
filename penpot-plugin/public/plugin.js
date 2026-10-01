@@ -221,6 +221,13 @@ penpot.ui.onMessage(async (message) => {
     sendSelection();
     return;
   }
+  if (message?.type === "designbridge:get-linked-snapshot") {
+    penpot.ui.sendMessage({
+      type: "designbridge:linked-snapshot",
+      snapshots: linkedShapesOnCurrentPage().map(serializeShape)
+    });
+    return;
+  }
   if (message?.type === "designbridge:get-context") {
     sendContext();
     return;
@@ -287,8 +294,8 @@ function flexSnapshot(shape) {
   };
 }
 
-function serializeSelection() {
-  return (penpot.selection || []).map(shape => ({
+function serializeShape(shape) {
+  return {
     penpot_id: shape.id,
     designbridge_id: shape.getPluginData("designbridge:id") || null,
     designbridge_type: shape.getPluginData("designbridge:type") || null,
@@ -301,7 +308,11 @@ function serializeSelection() {
     text: shape.type === "text" ? shape.characters : null,
     fill: shapeFill(shape),
     ...flexSnapshot(shape)
-  }));
+  };
+}
+
+function serializeSelection() {
+  return (penpot.selection || []).map(serializeShape);
 }
 
 function sendSelection() {
