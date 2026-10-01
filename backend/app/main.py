@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import ValidationError
 
@@ -10,7 +11,19 @@ from .operations import OperationBatch, apply_operations
 from .penpot_sync import PenpotShapeSnapshot, compare_penpot_snapshot
 from .storage import DesignStore
 
-app = FastAPI(title="DesignBridge API", version="0.5.0")
+app = FastAPI(title="DesignBridge API", version="0.6.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:4400",
+        "http://127.0.0.1:4400",
+        "https://design.penpot.app",
+        "https://penpot.app",
+    ],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
 ROOT = Path(__file__).resolve().parents[2]
 WEB_ROOT = ROOT / "web"
 DATA_ROOT = ROOT / "data"
@@ -19,7 +32,7 @@ STORE = DesignStore(DATA_ROOT / "designbridge.db")
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "service": "designbridge", "version": "0.5.0"}
+    return {"status": "ok", "service": "designbridge", "version": "0.6.0"}
 
 
 @app.post("/api/validate")
@@ -108,6 +121,53 @@ def compare_penpot(payload: dict) -> dict:
     return {
         "batch": batch.model_dump(mode="json", exclude_none=True),
         "preview": preview.model_dump(mode="json", exclude_none=True),
+    }
+
+
+@app.get("/api/penpot/projects/{project_id}/current")
+def penpot_current_project(project_id: str) -> dict:
+    try:
+        result = STORE.load(project_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="project not found")
+    return {
+        "project_id": project_id,
+        "revision": result["revision"],
+        "document": result["document"].model_dump(mode="json", exclude_none=True),
+    }
+
+
+@app.post("/api/penpot/projects/{project_id}/selection")
+def penpot_sync_selection(project_id: str, payload: dict) -> dict:
+    try:
+        current = STORE.load(project_id)
+        document = current["document"]
+        snapshots = [
+            PenpotShapeSnapshot.model_validate(item)
+            for item in payload.get("selection", [])
+            if item.get("designbridge_id")
+        ]
+        if not snapshots:
+            raise ValueError("no DesignBridge-linked Penpot shapes supplied")
+        batch = compare_penpot_snapshot(document, snapshots)
+        preview = apply_operations(document, batch)
+        saved = STORE.save(
+            preview.document,
+            description=str(payload.get("description") or "Penpot selection sync"),
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="project not found")
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return {
+        "project_id": project_id,
+        "revision": saved["revision"],
+        "batch": batch.model_dump(mode="json", exclude_none=True),
+        "document": preview.document.model_dump(mode="json", exclude_none=True),
+        "changes": preview.changes,
     }
 
 
