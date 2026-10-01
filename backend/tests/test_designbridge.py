@@ -1136,3 +1136,172 @@ def test_penpot_capture_component_definitions_blocks_stale_revision(monkeypatch,
         },
     )
     assert response.status_code == 409
+
+
+def _variant_test_document():
+    document = DesignBridgeDocument.model_validate(VALID).model_copy(deep=True)
+    base_component = document.components[0]
+    base_component.variant_group = "card-state"
+    base_component.variant_properties = {"state": "default"}
+    base_component.children[0].variant_slot = "label"
+
+    active = type(base_component).model_validate(
+        {
+            "id": "card-active",
+            "type": "component",
+            "name": "Card Active",
+            "variant_group": "card-state",
+            "variant_properties": {"state": "active"},
+            "children": [
+                {
+                    "id": "card-active-label",
+                    "type": "text",
+                    "name": "Label",
+                    "text": "Active",
+                    "variant_slot": "label",
+                }
+            ],
+        }
+    )
+    document.components.append(active)
+    return document
+
+
+def test_variant_schema_rejects_duplicate_property_combination():
+    document = _variant_test_document()
+    duplicate = document.components[1].model_copy(deep=True)
+    duplicate.id = "card-active-duplicate"
+    duplicate.children[0].id = "card-active-duplicate-label"
+    duplicate.variant_properties = {"state": "active"}
+    document.components.append(duplicate)
+
+    with pytest.raises(ValidationError):
+        DesignBridgeDocument.model_validate(
+            document.model_dump(mode="json", exclude_none=True)
+        )
+
+
+def test_penpot_variant_families_endpoint(monkeypatch, tmp_path):
+    from app import main as main_module
+    from app.storage import DesignStore
+
+    document = _variant_test_document()
+    store = DesignStore(tmp_path / "variants.db")
+    monkeypatch.setattr(main_module, "STORE", store)
+    client = TestClient(main_module.app)
+    client.post(
+        "/api/projects/save",
+        json={
+            "document": document.model_dump(mode="json", exclude_none=True),
+            "description": "variants",
+        },
+    )
+
+    response = client.get("/api/penpot/projects/demo/variants")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["revision"] == 1
+    assert body["variants"]["summary"]["variant_groups"] == 1
+    assert body["variants"]["summary"]["variant_components"] == 2
+
+
+def test_penpot_variant_switch_plan_endpoint(monkeypatch, tmp_path):
+    from app import main as main_module
+    from app.storage import DesignStore
+
+    document = _variant_test_document()
+    document.pages[0].children[0].children[1].overrides = {
+        "card-label": {"text": "Custom"}
+    }
+
+    store = DesignStore(tmp_path / "variant-plan.db")
+    monkeypatch.setattr(main_module, "STORE", store)
+    client = TestClient(main_module.app)
+    client.post(
+        "/api/projects/save",
+        json={
+            "document": document.model_dump(mode="json", exclude_none=True),
+            "description": "variants",
+        },
+    )
+
+    response = client.post(
+        "/api/penpot/projects/demo/variant-switch-plan",
+        json={
+            "instance_id": "card-instance",
+            "target_component_id": "card-active",
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["revision"] == 1
+    assert body["plan"]["compatible"] is True
+    assert body["plan"]["remapped_overrides"] == {
+        "card-active-label": {"text": "Custom"}
+    }
+
+
+def test_penpot_commit_variant_switch_endpoint(monkeypatch, tmp_path):
+    from app import main as main_module
+    from app.storage import DesignStore
+
+    document = _variant_test_document()
+    document.pages[0].children[0].children[1].overrides = {
+        "card-label": {"text": "Custom"}
+    }
+
+    store = DesignStore(tmp_path / "variant-commit.db")
+    monkeypatch.setattr(main_module, "STORE", store)
+    client = TestClient(main_module.app)
+    client.post(
+        "/api/projects/save",
+        json={
+            "document": document.model_dump(mode="json", exclude_none=True),
+            "description": "variants",
+        },
+    )
+
+    response = client.post(
+        "/api/penpot/projects/demo/commit-variant-switch",
+        json={
+            "expected_revision": 1,
+            "instance_id": "card-instance",
+            "target_component_id": "card-active",
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["revision"] == 2
+    instance = body["document"]["pages"][0]["children"][0]["children"][1]
+    assert instance["component_id"] == "card-active"
+    assert instance["variant_group"] == "card-state"
+    assert instance["overrides"] == {
+        "card-active-label": {"text": "Custom"}
+    }
+
+
+def test_penpot_commit_variant_switch_blocks_stale_revision(monkeypatch, tmp_path):
+    from app import main as main_module
+    from app.storage import DesignStore
+
+    document = _variant_test_document()
+    store = DesignStore(tmp_path / "variant-stale.db")
+    monkeypatch.setattr(main_module, "STORE", store)
+    client = TestClient(main_module.app)
+    client.post(
+        "/api/projects/save",
+        json={
+            "document": document.model_dump(mode="json", exclude_none=True),
+            "description": "variants",
+        },
+    )
+
+    response = client.post(
+        "/api/penpot/projects/demo/commit-variant-switch",
+        json={
+            "expected_revision": 0,
+            "instance_id": "card-instance",
+            "target_component_id": "card-active",
+        },
+    )
+    assert response.status_code == 409
