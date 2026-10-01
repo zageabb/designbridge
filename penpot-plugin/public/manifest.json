@@ -1,10 +1,11 @@
 {
   "name": "DesignBridge Importer",
-  "description": "Import validated DesignBridge JSON as editable native Penpot objects.",
+  "description": "Import, synchronize and update DesignBridge designs as editable native Penpot objects.",
   "version": 2,
   "code": "plugin.js",
   "permissions": [
     "content:read",
-    "content:write"
+    "content:write",
+    "allow:localstorage"
   ]
 }
