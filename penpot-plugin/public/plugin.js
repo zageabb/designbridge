@@ -112,6 +112,7 @@ async function createComponents(document) {
   if (!(document.components || []).length) return;
   const page = penpot.createPage();
   page.name = "Design System";
+  page.setPluginData("designbridge:page-id", "__components__");
   await penpot.openPage(page);
 
   let y = 0;
@@ -139,6 +140,7 @@ async function importDocument(document) {
   for (const pageModel of pages) {
     const page = penpot.createPage();
     page.name = pageModel.name;
+    page.setPluginData("designbridge:page-id", pageModel.id);
     await penpot.openPage(page);
     for (const node of pageModel.children || []) createNode(node, page.root, document);
   }
@@ -270,11 +272,13 @@ penpot.ui.onMessage(async (message) => {
       snapshots: linkedShapesAcrossDocument().map(item => ({
         ...serializeShape(item.shape),
         page_id: item.page.id,
-        page_name: item.page.name
+        page_name: item.page.name,
+        designbridge_page_id: item.page.getPluginData("designbridge:page-id") || null
       })),
       pages: (penpot.currentFile?.pages || []).map(page => ({
         page_id: page.id,
-        page_name: page.name
+        page_name: page.name,
+        designbridge_page_id: page.getPluginData("designbridge:page-id") || null
       }))
     });
     return;
