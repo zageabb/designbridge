@@ -989,3 +989,150 @@ def test_instance_override_rejects_unsupported_property():
     }
     with pytest.raises(ValidationError):
         DesignBridgeDocument.model_validate(invalid)
+
+
+def test_penpot_component_definitions_endpoint(monkeypatch, tmp_path):
+    from app import main as main_module
+    from app.storage import DesignStore
+
+    store = DesignStore(tmp_path / "component-definitions.db")
+    monkeypatch.setattr(main_module, "STORE", store)
+    client = TestClient(main_module.app)
+    client.post("/api/projects/save", json={"document": VALID, "description": "initial"})
+
+    response = client.post(
+        "/api/penpot/projects/demo/component-definitions",
+        json={
+            "snapshots": [
+                {
+                    "designbridge_id": "card",
+                    "designbridge_type": "component",
+                    "component_role": "main_root",
+                    "component_id": "card",
+                    "name": "Card",
+                },
+                {
+                    "designbridge_id": "card-label",
+                    "designbridge_type": "text",
+                    "component_role": "main_member",
+                    "component_id": "card",
+                    "name": "Label",
+                    "text": "Changed main label",
+                },
+            ]
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["report"]["summary"]["changed"] == 1
+    assert body["report"]["changed_component_ids"] == ["card"]
+
+
+def test_penpot_capture_component_definitions_endpoint(monkeypatch, tmp_path):
+    from app import main as main_module
+    from app.storage import DesignStore
+
+    store = DesignStore(tmp_path / "component-definitions-capture.db")
+    monkeypatch.setattr(main_module, "STORE", store)
+    client = TestClient(main_module.app)
+    client.post("/api/projects/save", json={"document": VALID, "description": "initial"})
+
+    response = client.post(
+        "/api/penpot/projects/demo/capture-component-definitions",
+        json={
+            "expected_revision": 1,
+            "component_ids": ["card"],
+            "snapshots": [
+                {
+                    "designbridge_id": "card",
+                    "designbridge_type": "component",
+                    "component_role": "main_root",
+                    "component_id": "card",
+                    "name": "Renamed Card",
+                },
+                {
+                    "designbridge_id": "card-label",
+                    "designbridge_type": "text",
+                    "component_role": "main_member",
+                    "component_id": "card",
+                    "name": "Label",
+                    "text": "Changed main label",
+                },
+            ],
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["changed"] is True
+    assert body["revision"] == 2
+    assert body["document"]["components"][0]["name"] == "Renamed Card"
+    assert body["document"]["components"][0]["children"][0]["text"] == "Changed main label"
+
+
+def test_penpot_capture_component_definitions_preserves_instance_overrides(monkeypatch, tmp_path):
+    from app import main as main_module
+    from app.storage import DesignStore
+
+    document = DesignBridgeDocument.model_validate(VALID).model_copy(deep=True)
+    document.pages[0].children[0].children[1].overrides = {
+        "card-label": {"text": "Instance text"}
+    }
+
+    store = DesignStore(tmp_path / "component-definitions-overrides.db")
+    monkeypatch.setattr(main_module, "STORE", store)
+    client = TestClient(main_module.app)
+    client.post(
+        "/api/projects/save",
+        json={"document": document.model_dump(mode="json", exclude_none=True), "description": "initial"},
+    )
+
+    response = client.post(
+        "/api/penpot/projects/demo/capture-component-definitions",
+        json={
+            "expected_revision": 1,
+            "component_ids": ["card"],
+            "snapshots": [
+                {
+                    "designbridge_id": "card",
+                    "designbridge_type": "component",
+                    "component_role": "main_root",
+                    "component_id": "card",
+                    "name": "Card",
+                },
+                {
+                    "designbridge_id": "card-label",
+                    "designbridge_type": "text",
+                    "component_role": "main_member",
+                    "component_id": "card",
+                    "name": "Label",
+                    "text": "Changed main label",
+                },
+            ],
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    instance = body["document"]["pages"][0]["children"][0]["children"][1]
+    assert instance["overrides"] == {
+        "card-label": {"text": "Instance text"}
+    }
+
+
+def test_penpot_capture_component_definitions_blocks_stale_revision(monkeypatch, tmp_path):
+    from app import main as main_module
+    from app.storage import DesignStore
+
+    store = DesignStore(tmp_path / "component-definitions-stale.db")
+    monkeypatch.setattr(main_module, "STORE", store)
+    client = TestClient(main_module.app)
+    client.post("/api/projects/save", json={"document": VALID, "description": "initial"})
+
+    response = client.post(
+        "/api/penpot/projects/demo/capture-component-definitions",
+        json={
+            "expected_revision": 0,
+            "component_ids": ["card"],
+            "snapshots": [],
+        },
+    )
+    assert response.status_code == 409
