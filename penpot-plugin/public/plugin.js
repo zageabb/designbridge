@@ -1,4 +1,4 @@
-penpot.ui.open("DesignBridge Importer", "index.html", { width: 420, height: 620 });
+penpot.ui.open("DesignBridge Importer", "index.html", { width: 460, height: 720 });
 
 const componentMap = new Map();
 const colorMap = new Map();
@@ -208,6 +208,10 @@ penpot.ui.onMessage(async (message) => {
     sendSelection();
     return;
   }
+  if (message?.type === "designbridge:get-context") {
+    sendContext();
+    return;
+  }
   if (message?.type === "designbridge:update-linked") {
     try {
       const result = updateLinkedShapes(message.document);
@@ -267,5 +271,15 @@ function sendSelection() {
   });
 }
 
+function sendContext() {
+  penpot.ui.sendMessage({
+    type: "designbridge:context",
+    project_id: penpot.currentFile?.getPluginData("designbridge:document-id") || null,
+    file_name: penpot.currentFile?.name || null,
+    page_name: penpot.currentPage?.name || null
+  });
+}
+
 penpot.on("selectionchange", () => sendSelection());
+sendContext();
 sendSelection();
