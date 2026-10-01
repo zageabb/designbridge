@@ -32,12 +32,14 @@ Rules:
 """
 
 
-def build_design_prompt(document: DesignBridgeDocument, instruction: str) -> str:
+def build_design_prompt(document: DesignBridgeDocument, instruction: str, selection_ids: list[str] | None = None) -> str:
     compact = document.model_dump(mode="json", exclude_none=True)
     return (
         SYSTEM_PROMPT
         + "\nUSER INSTRUCTION:\n"
         + instruction.strip()
+        + "\nSELECTED DESIGNBRIDGE IDS:\n"
+        + json.dumps(selection_ids or [])
         + "\nCURRENT DOCUMENT:\n"
         + json.dumps(compact, separators=(",", ":"))
     )
@@ -62,6 +64,7 @@ async def propose_operations(
     *,
     base_url: str | None = None,
     model: str | None = None,
+    selection_ids: list[str] | None = None,
 ) -> OperationBatch:
     ollama_url = (
         base_url
@@ -76,7 +79,7 @@ async def propose_operations(
 
     payload: dict[str, Any] = {
         "model": ollama_model,
-        "prompt": build_design_prompt(document, instruction),
+        "prompt": build_design_prompt(document, instruction, selection_ids),
         "stream": False,
         "format": "json",
         "options": {"temperature": 0.1},
