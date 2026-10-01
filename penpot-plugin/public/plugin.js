@@ -171,6 +171,30 @@ function linkedShapesOnCurrentPage() {
   );
 }
 
+
+function applyPropertyUpdates(updates) {
+  const byId = new Map(linkedShapesOnCurrentPage().map(shape => [shape.getPluginData("designbridge:id"), shape]));
+  let updated = 0;
+  for (const item of updates || []) {
+    const shape = byId.get(item.node_id);
+    if (!shape) continue;
+    const value = item.value;
+    if (item.property === "name") shape.name = value;
+    else if (item.property === "x" && typeof value === "number") shape.x = value;
+    else if (item.property === "y" && typeof value === "number") shape.y = value;
+    else if (item.property === "width" && typeof value === "number" && typeof shape.resize === "function") shape.resize(value, shape.height);
+    else if (item.property === "height" && typeof value === "number" && typeof shape.resize === "function") shape.resize(shape.width, value);
+    else if (item.property === "text" && shape.type === "text" && typeof value === "string") shape.characters = value;
+    else if (item.property === "fill" && value && shape.type !== "text") shape.fills = [{ fillColor: value, fillOpacity: 1 }];
+    else if (item.property === "layout" && shape.type === "board" && value) {
+      const flex = shape.flex || shape.layout || null;
+      if (flex) setFlexLayout(flex, value);
+    } else continue;
+    updated += 1;
+  }
+  return { updated };
+}
+
 function updateLinkedShapes(document, nodeIds=null) {
   const nodes = indexDocumentNodes(document);
   const allowed = nodeIds ? new Set(nodeIds) : null;
@@ -236,6 +260,16 @@ penpot.ui.onMessage(async (message) => {
     if (penpot.currentFile && Number.isFinite(Number(message.revision))) {
       penpot.currentFile.setPluginData("designbridge:revision", String(Number(message.revision)));
       sendContext();
+    }
+    return;
+  }
+  if (message?.type === "designbridge:apply-property-updates") {
+    try {
+      const result = applyPropertyUpdates(message.updates || []);
+      penpot.ui.sendMessage({ type: "designbridge:property-update-result", ok: true, result });
+      sendSelection();
+    } catch (error) {
+      penpot.ui.sendMessage({ type: "designbridge:property-update-result", ok: false, error: error instanceof Error ? error.message : String(error) });
     }
     return;
   }
