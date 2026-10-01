@@ -268,3 +268,55 @@ def test_operation_rejects_unknown_node():
         },
     )
     assert response.status_code == 422
+
+
+def test_project_save_load_undo_redo(monkeypatch, tmp_path):
+    from app import main as main_module
+    from app.storage import DesignStore
+
+    monkeypatch.setattr(main_module, "STORE", DesignStore(tmp_path / "api.db"))
+    client = TestClient(main_module.app)
+
+    saved = client.post(
+        "/api/projects/save",
+        json={"document": VALID, "description": "initial"},
+    )
+    assert saved.status_code == 200
+    assert saved.json()["revision"] == 1
+
+    changed = {**VALID}
+    changed["pages"] = [
+        {
+            **VALID["pages"][0],
+            "children": [
+                {
+                    **VALID["pages"][0]["children"][0],
+                    "children": [
+                        {
+                            **VALID["pages"][0]["children"][0]["children"][0],
+                            "text": "Changed",
+                        },
+                        VALID["pages"][0]["children"][0]["children"][1],
+                    ],
+                }
+            ],
+        }
+    ]
+    second = client.post(
+        "/api/projects/save",
+        json={"document": changed, "description": "changed"},
+    )
+    assert second.status_code == 200
+    assert second.json()["revision"] == 2
+
+    history = client.get("/api/projects/demo/history")
+    assert history.status_code == 200
+    assert len(history.json()["history"]) == 2
+
+    undo = client.post("/api/projects/demo/undo")
+    assert undo.status_code == 200
+    assert undo.json()["revision"] == 1
+
+    redo = client.post("/api/projects/demo/redo")
+    assert redo.status_code == 200
+    assert redo.json()["revision"] == 2

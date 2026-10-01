@@ -147,6 +147,10 @@ async function importDocument(document) {
 }
 
 penpot.ui.onMessage(async (message) => {
+  if (message?.type === "designbridge:get-selection") {
+    sendSelection();
+    return;
+  }
   if (message?.type !== "designbridge:import") return;
   try {
     const result = await importDocument(message.document);
@@ -159,3 +163,28 @@ penpot.ui.onMessage(async (message) => {
     });
   }
 });
+
+
+function serializeSelection() {
+  return (penpot.selection || []).map(shape => ({
+    penpot_id: shape.id,
+    designbridge_id: shape.getPluginData("designbridge:id") || null,
+    designbridge_type: shape.getPluginData("designbridge:type") || null,
+    name: shape.name,
+    type: shape.type,
+    x: shape.x,
+    y: shape.y,
+    width: shape.width,
+    height: shape.height
+  }));
+}
+
+function sendSelection() {
+  penpot.ui.sendMessage({
+    type: "designbridge:selection",
+    selection: serializeSelection()
+  });
+}
+
+penpot.on("selectionchange", () => sendSelection());
+sendSelection();
