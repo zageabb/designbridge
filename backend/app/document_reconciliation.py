@@ -87,15 +87,22 @@ def reconcile_document(
         meta = expected.get(node_id)
         if not meta:
             continue
-        item_page_id = str(item.get("page_id") or "")
-        if meta["page_id"] != "__components__" and item_page_id and item_page_id != meta["page_id"]:
+        canonical_page_id = str(item.get("designbridge_page_id") or "")
+        actual_page_name = str(item.get("page_name") or "")
+        location_matches = (
+            canonical_page_id == meta["page_id"]
+            if canonical_page_id
+            else actual_page_name == meta["page_name"]
+        )
+        if not location_matches:
             review.setdefault("location_mismatches", []).append(
                 {
                     "node_id": node_id,
                     "expected_page_id": meta["page_id"],
                     "expected_page_name": meta["page_name"],
-                    "actual_page_id": item_page_id,
+                    "actual_page_id": item.get("page_id"),
                     "actual_page_name": item.get("page_name"),
+                    "actual_designbridge_page_id": item.get("designbridge_page_id"),
                 }
             )
 
