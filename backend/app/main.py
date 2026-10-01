@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import ValidationError
 
+from .component_sync import component_instance_report, instance_override_changes
 from .design_agent import propose_operations
 from .document_reconciliation import reconcile_document
 from .models import DesignBridgeDocument
@@ -14,7 +15,7 @@ from .revision_diff import compare_documents, selective_pull_plan
 from .storage import DesignStore
 from .three_way import resolution_plan, three_way_review
 
-app = FastAPI(title="DesignBridge API", version="0.14.0")
+app = FastAPI(title="DesignBridge API", version="0.15.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -35,7 +36,7 @@ STORE = DesignStore(DATA_ROOT / "designbridge.db")
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "service": "designbridge", "version": "0.14.0"}
+    return {"status": "ok", "service": "designbridge", "version": "0.15.0"}
 
 
 @app.post("/api/validate")
@@ -188,6 +189,111 @@ def penpot_project_diff(
         "from_description": before["description"],
         "to_description": after["description"],
         "diff": compare_documents(before["document"], after["document"]),
+    }
+
+
+@app.post("/api/penpot/projects/{project_id}/component-report")
+def penpot_component_report(project_id: str, payload: dict) -> dict:
+    try:
+        current = STORE.load(project_id)
+        snapshots = [dict(item) for item in payload.get("snapshots", [])]
+        report = component_instance_report(current["document"], snapshots)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="project not found")
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return {
+        "project_id": project_id,
+        "revision": current["revision"],
+        "report": report,
+    }
+
+
+@app.post("/api/penpot/projects/{project_id}/capture-instance-overrides")
+def penpot_capture_instance_overrides(project_id: str, payload: dict) -> dict:
+    try:
+        current = STORE.load(project_id)
+        expected_revision = payload.get("expected_revision")
+        if expected_revision is None:
+            raise ValueError("expected_revision is required")
+        if int(expected_revision) != int(current["revision"]):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "revision_conflict",
+                    "message": "Penpot is based on an older DesignBridge revision",
+                    "expected_revision": int(expected_revision),
+                    "current_revision": int(current["revision"]),
+                },
+            )
+
+        snapshots = [dict(item) for item in payload.get("snapshots", [])]
+        instance_ids = [str(item) for item in payload.get("instance_ids", [])]
+        desired = instance_override_changes(
+            current["document"],
+            snapshots,
+            instance_ids,
+        )
+
+        instance_nodes = {}
+        def walk(node):
+            if node.type == "instance":
+                instance_nodes[node.id] = node
+            for child in node.children:
+                walk(child)
+        for page in current["document"].pages:
+            for node in page.children:
+                walk(node)
+
+        operations = [
+            DesignOperation(
+                action="update_node",
+                node_id=instance_id,
+                changes={"overrides": overrides},
+            )
+            for instance_id, overrides in desired.items()
+            if instance_nodes[instance_id].overrides != overrides
+        ]
+
+        if not operations:
+            return {
+                "project_id": project_id,
+                "revision": current["revision"],
+                "changed": False,
+                "captured": desired,
+                "document": current["document"].model_dump(mode="json", exclude_none=True),
+            }
+
+        applied = apply_operations(
+            current["document"],
+            OperationBatch(
+                description="Capture Penpot component instance overrides",
+                operations=operations,
+            ),
+        )
+        saved = STORE.save(
+            applied.document,
+            description=str(
+                payload.get("description")
+                or "Capture Penpot component instance overrides"
+            ),
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="project not found")
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+    except HTTPException:
+        raise
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return {
+        "project_id": project_id,
+        "revision": saved["revision"],
+        "changed": True,
+        "captured": desired,
+        "document": applied.document.model_dump(mode="json", exclude_none=True),
     }
 
 
