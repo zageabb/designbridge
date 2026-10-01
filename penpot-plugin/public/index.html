@@ -28,6 +28,7 @@
       <button id="checkConflicts">Check local conflicts</button>
       <button id="reviewDocument">Review whole document</button>
       <button id="reviewComponents">Review components</button>
+      <button id="reviewDefinitions">Review definitions</button>
       <button id="pullLatest">Pull latest</button>
       <button id="pushSelection">Push selection</button>
     </div>
@@ -38,6 +39,7 @@
     <div id="conflictSummary" style="margin-top:8px;display:none;border-top:1px solid #343d45;padding-top:8px"></div>
     <div id="documentSummary" style="margin-top:8px;display:none;border-top:1px solid #343d45;padding-top:8px"></div>
     <div id="componentSummary" style="margin-top:8px;display:none;border-top:1px solid #343d45;padding-top:8px"></div>
+    <div id="definitionSummary" style="margin-top:8px;display:none;border-top:1px solid #343d45;padding-top:8px"></div>
   </div>
   <textarea id="json" placeholder='{"format":"designbridge", ...}'></textarea>
   <div class="row">
@@ -56,7 +58,7 @@
 <script>
 const input=document.getElementById("json"), status=document.getElementById("status"), selectionStatus=document.getElementById("selectionStatus");
 const apiUrl=document.getElementById("apiUrl"),syncStatus=document.getElementById("syncStatus"),projectIdEl=document.getElementById("projectId"),revisionState=document.getElementById("revisionState");
-const updateBadge=document.getElementById("updateBadge"),latestSummary=document.getElementById("latestSummary"),diffSummary=document.getElementById("diffSummary"),selectivePull=document.getElementById("selectivePull"),conflictSummary=document.getElementById("conflictSummary"),documentSummary=document.getElementById("documentSummary"),componentSummary=document.getElementById("componentSummary");
+const updateBadge=document.getElementById("updateBadge"),latestSummary=document.getElementById("latestSummary"),diffSummary=document.getElementById("diffSummary"),selectivePull=document.getElementById("selectivePull"),conflictSummary=document.getElementById("conflictSummary"),documentSummary=document.getElementById("documentSummary"),componentSummary=document.getElementById("componentSummary"),definitionSummary=document.getElementById("definitionSummary");
 let lastSelection=[],projectId=null,localRevision=null,currentRevision=null,statusTimer=null,lastDiff=null,linkedSnapshotResolver=null,documentSnapshotResolver=null,lastLinkedSnapshots=[];
 try{
   const remembered=localStorage.getItem("designbridge:api-url");
@@ -149,6 +151,90 @@ function renderDiff(data){
 
 
 
+
+
+function renderDefinitionReport(data){
+  const report=data.report||{}, summary=report.summary||{}, rows=[];
+  for(const item of report.components||[]){
+    const protectedCount=Object.values(item.protected_instance_overrides||{}).reduce(
+      (total,byChild)=>total+Object.values(byChild||{}).reduce((n,props)=>n+(props?.length||0),0),0
+    );
+    rows.push("<div style='margin:5px 0'><strong>"+item.component_id+"</strong> · "+item.status+
+      (Object.keys(item.root_changes||{}).length?"<br><span class='muted'>root: "+Object.keys(item.root_changes).join(", ")+"</span>":"")+
+      (Object.keys(item.child_changes||{}).length?"<br><span class='muted'>children changed: "+Object.keys(item.child_changes).join(", ")+"</span>":"")+
+      (protectedCount?"<br><span class='muted'>protected instance overrides: "+protectedCount+"</span>":"")+"</div>");
+  }
+  const changed=report.changed_component_ids||[];
+  definitionSummary.style.display="block";
+  definitionSummary.innerHTML=
+    "<div class='muted' style='margin:0 0 6px'>Definitions: "+(summary.in_sync||0)+" in sync · "+(summary.changed||0)+" changed in Penpot · "+(summary.missing||0)+" missing</div>"+
+    (rows.join("")||"<div>No canonical components.</div>")+
+    (changed.length?"<div class='row'><button id='captureDefinitions'>Capture Penpot definitions</button><button id='applyDefinitions' style='background:#343d45'>Use DesignBridge definitions</button></div>":"");
+  const capture=document.getElementById("captureDefinitions");
+  if(capture)capture.onclick=()=>captureComponentDefinitions(changed);
+  const apply=document.getElementById("applyDefinitions");
+  if(apply)apply.onclick=()=>applyCanonicalDefinitions(changed);
+}
+async function reviewDefinitions(){
+  try{
+    if(!projectId||localRevision==null)throw new Error("A linked DesignBridge revision is required.");
+    const snapshot=await requestDocumentSnapshot();
+    lastLinkedSnapshots=snapshot.snapshots||[];
+    const data=await api(
+      "/api/penpot/projects/"+encodeURIComponent(projectId)+"/component-definitions",
+      {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({snapshots:lastLinkedSnapshots})}
+    );
+    renderDefinitionReport(data);
+    const s=data.report?.summary||{};
+    syncStatus.textContent="Component definition review complete: "+(s.changed||0)+" changed.";
+  }catch(error){
+    syncStatus.textContent="Definition review failed: "+error.message;
+  }
+}
+async function captureComponentDefinitions(componentIds){
+  try{
+    if(!projectId||localRevision==null)throw new Error("A linked DesignBridge revision is required.");
+    const data=await api(
+      "/api/penpot/projects/"+encodeURIComponent(projectId)+"/capture-component-definitions",
+      {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
+        expected_revision:localRevision,
+        snapshots:lastLinkedSnapshots,
+        component_ids:componentIds,
+        description:"Capture Penpot component definition changes"
+      })}
+    );
+    input.value=JSON.stringify(data.document,null,2);
+    if(data.changed){
+      setRevision(data.revision);
+      currentRevision=data.revision;
+      syncStatus.textContent="Captured component definitions in revision "+data.revision+".";
+    }else{
+      syncStatus.textContent="Component definitions already match DesignBridge.";
+    }
+    await refreshStatus();
+    await reviewDefinitions();
+  }catch(error){
+    syncStatus.textContent="Definition capture failed: "+error.message;
+  }
+}
+async function applyCanonicalDefinitions(componentIds){
+  try{
+    if(!projectId)throw new Error("This file is not linked to DesignBridge.");
+    const latest=await api("/api/penpot/projects/"+encodeURIComponent(projectId)+"/current");
+    input.value=JSON.stringify(latest.document,null,2);
+    parent.postMessage({
+      type:"designbridge:update-component-definitions",
+      document:latest.document,
+      component_ids:componentIds
+    },"*");
+    setRevision(latest.revision);
+    currentRevision=latest.revision;
+    syncStatus.textContent="Applied canonical component definitions from revision "+latest.revision+". Existing Penpot instance overrides remain protected by Penpot.";
+    await refreshStatus();
+  }catch(error){
+    syncStatus.textContent="Definition pull failed: "+error.message;
+  }
+}
 
 function renderComponentReport(data){
   const report=data.report||{}, summary=report.summary||{}, rows=[];
@@ -430,6 +516,7 @@ document.getElementById("reviewLatest").addEventListener("click",reviewLatest);
 document.getElementById("checkConflicts").addEventListener("click",checkLocalConflicts);
 document.getElementById("reviewDocument").addEventListener("click",reviewWholeDocument);
 document.getElementById("reviewComponents").addEventListener("click",reviewComponents);
+document.getElementById("reviewDefinitions").addEventListener("click",reviewDefinitions);
 document.getElementById("pullLatest").addEventListener("click",pullLatest);
 document.getElementById("pushSelection").addEventListener("click",pushSelection);
 
@@ -500,6 +587,12 @@ window.addEventListener("message",event=>{
     selectionStatus.textContent=linked.length
       ? "Selected: "+linked.map(item=>item.name+" ["+item.designbridge_id+"]").join(", ")
       : "Selection has no DesignBridge-linked shapes.";
+    return;
+  }
+  if(message?.type==="designbridge:component-definition-update-result"){
+    status.textContent=message.ok
+      ? "Updated "+message.result.updated+" component main shape(s)."
+      : "Component definition update failed: "+message.error;
     return;
   }
   if(message?.type==="designbridge:update-linked-result"){
