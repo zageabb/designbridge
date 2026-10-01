@@ -171,9 +171,21 @@ function linkedShapesOnCurrentPage() {
   );
 }
 
+function linkedShapesAcrossDocument() {
+  const pages = penpot.currentFile?.pages || [];
+  const rows = [];
+  for (const page of pages) {
+    for (const shape of page.findShapes()) {
+      if (!shape.getPluginData("designbridge:id")) continue;
+      rows.push({ page, shape });
+    }
+  }
+  return rows;
+}
+
 
 function applyPropertyUpdates(updates) {
-  const byId = new Map(linkedShapesOnCurrentPage().map(shape => [shape.getPluginData("designbridge:id"), shape]));
+  const byId = new Map(linkedShapesAcrossDocument().map(item => [item.shape.getPluginData("designbridge:id"), item.shape]));
   let updated = 0;
   for (const item of updates || []) {
     const shape = byId.get(item.node_id);
@@ -249,6 +261,21 @@ penpot.ui.onMessage(async (message) => {
     penpot.ui.sendMessage({
       type: "designbridge:linked-snapshot",
       snapshots: linkedShapesOnCurrentPage().map(serializeShape)
+    });
+    return;
+  }
+  if (message?.type === "designbridge:get-document-snapshot") {
+    penpot.ui.sendMessage({
+      type: "designbridge:document-snapshot",
+      snapshots: linkedShapesAcrossDocument().map(item => ({
+        ...serializeShape(item.shape),
+        page_id: item.page.id,
+        page_name: item.page.name
+      })),
+      pages: (penpot.currentFile?.pages || []).map(page => ({
+        page_id: page.id,
+        page_name: page.name
+      }))
     });
     return;
   }
