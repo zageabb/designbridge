@@ -20,6 +20,21 @@ Before changing code:
 
 Repository state is authoritative. Do not rely on chat history when Git, code, tests, CI or `DEVELOPMENT.md` provide a more current answer.
 
+## Current DesignBridge development state
+
+Merged runtime capability is verified through v0.16.
+
+Current active item:
+
+- DEV-017 — component variants and safe switching.
+- Branch: `feature/v0.17-component-variants-rebased`.
+- Original PR #17 became non-mergeable after newer process/documentation commits landed on `main`.
+- The runtime implementation has been rebased onto current `main`; active integration is PR #18 from the rebased branch.
+- Original v0.17 code CI passed in GitHub Actions run #174.
+- Rebased-branch CI and merge/post-merge verification remain required before DEV-017 can become COMPLETE.
+
+After DEV-017 is integrated, the highest-priority architectural item is durable revision identity using a deterministic SHA-256 content/revision token. Do not add substantially more destructive synchronization before this integrity gap is addressed unless the user explicitly reprioritizes it.
+
 ## Development rules
 
 - Preserve the existing architecture, UI conventions and working behaviour unless the requested change requires otherwise.
@@ -104,6 +119,20 @@ Inspect the repository's actual deployment configuration before changing deploym
 - Do not assume every target is Dockerised.
 - Avoid introducing deployment-only dependencies into core application logic.
 - Keep local development possible where the existing project supports it.
+
+## Autonomous continuation rule
+
+When the user asks to continue development, operate under this rule:
+
+> Continue autonomously until one of these happens:
+> 1. the current objective is complete and verified;
+> 2. a genuinely ambiguous product decision is required;
+> 3. progress is blocked by something outside the repo;
+> 4. continuing would risk destructive changes.
+>
+> Do not stop just because one implementation step has completed.
+
+Normally continue through implementation, tests, CI inspection, fixes, documentation/evidence updates, PR creation, merge-readiness, merge, and post-merge verification without pausing after intermediate steps.
 
 ## Agent behaviour
 
