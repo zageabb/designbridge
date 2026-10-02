@@ -1,30 +1,181 @@
-# AI Development Instructions
+# AGENTS.md
 
-## Repository workflow
+## Project
+
+Repository: `zageabb/designbridge`
+
+This file is the persistent working agreement for ChatGPT, Codex, Olladex and other coding agents operating on this repository.
+
+## Start here
 
 Before changing code:
-1. Read `README.md`.
+
+1. Read this file.
 2. Read `DEVELOPMENT.md`.
-3. Read relevant design, TODO, roadmap, release, phase and audit documents.
-4. Inspect the existing implementation before proposing replacement architecture.
+3. Read the repository README and relevant DesignBridge documentation.
+4. Read TODO, roadmap, phase, audit, release, revision, design and development notes when present.
+5. Inspect the existing implementation before proposing replacement architecture.
+6. Identify the current DEV item, dependencies, branch ownership and integration state.
+7. Continue the highest-priority incomplete item unless the user explicitly asks for something else.
+
+Repository state is authoritative. Do not rely on chat history when Git, code, tests, CI or `DEVELOPMENT.md` provide a more current answer.
+
+## Development rules
+
+- Preserve the existing architecture, UI conventions and working behaviour unless the requested change requires otherwise.
+- Prefer extending existing modules over rewriting working code.
+- Keep modules focused and independently testable; avoid unnecessary monolithic files.
+- Maintain backwards compatibility where practical.
+- Keep business logic separate from UI, storage, integration and transport layers.
+- Do not hard-code passwords, tokens, API keys, server addresses, ports or environment-specific paths when configuration can be used.
+- Put secrets in environment/configuration mechanisms and never commit production secrets.
+- Keep configuration explicit and documented.
+- Update README/docs/DEVELOPMENT when implementation changes make them inaccurate.
+- Clearly mark scaffolds, placeholders, limitations and unfinished features.
+- Stay within the current objective. Record unrelated improvements as follow-up DEV items rather than silently expanding scope.
+
+## DesignBridge-specific principles
+
+- Preserve round-trip fidelity and revision traceability.
+- Prefer deterministic transforms and explicit conflict handling over silent mutation.
+- Keep Penpot/Figma/design-document interchange reviewable and reversible where practical.
+- Treat revision IDs, document identity, component identity and property-resolution rules as data-integrity concerns.
+- Do not silently discard unsupported properties, components, layouts or revision metadata.
+- Prefer explicit reconciliation states when source and target design documents diverge.
+- Keep developer-facing exports usable as real implementation artefacts rather than presentation-only approximations.
+
+## Reuse before duplication
+
+Before building a capability from scratch, inspect relevant existing repositories and reuse proven patterns or modules where appropriate, especially:
+
+- `context-studio`
+- `general-search`
+- `tender_designer`
+- `should-cost-intelligence`
+- `should-cost-price-estimator`
+- `system-knowledge-designer`
+- `olladex`
+- `AI_Spreadsheet`
+
+Reuse should preserve module boundaries and licensing/attribution requirements. Do not copy code blindly when a shared abstraction or adaptation is cleaner.
+
+## Testing and quality
+
+- Run the relevant automated tests before committing.
+- Add or update tests for material behaviour changes.
+- Run build, lint, type-check, migration or validation commands used by this repository when available.
+- For synchronisation/round-trip work, test both forward behaviour and recovery/reconciliation paths where applicable.
+- Do not claim a feature is complete if tests fail or only a scaffold exists.
+- Fix regressions introduced by the change before moving on.
+- Record validation evidence in the relevant `DEVELOPMENT.md` item.
+
+## Git workflow
+
+- Default branch is normally `main`; verify before acting.
+- Do not force-push the default branch.
+- Do not rewrite published history unless the user explicitly requests it.
+- Keep commits focused and use clear commit messages.
+- Do not push a change known to fail the repository's relevant tests/build unless the user explicitly requests a work-in-progress commit.
+- For parallel development, use separate branches/worktrees for independent DEV items where practical.
+- Record branch ownership and integration state in `DEVELOPMENT.md`.
+- Do not treat creation of a branch or PR as evidence that implementation is complete.
+
+## Parallel development
+
+Before starting parallel work:
+
+1. split only genuinely independent tasks;
+2. assign each task a DEV item;
+3. record Owner/Agent, Branch, Depends on, Can run in parallel with, and Integration status;
+4. record file/module/subsystem ownership where practical;
+5. check that another active agent does not already own the same area;
+6. do not represent sequential dependencies as parallel execution;
+7. preserve independent validation/evidence for every child task;
+8. identify who owns integration;
+9. verify the integrated result after merge.
+
+If tasks overlap materially, coordinate or sequence them instead of creating competing edits.
+
+## Deployment
+
+Inspect the repository's actual deployment configuration before changing deployment behaviour.
+
+- Preserve existing ports, volumes, environment variables, health checks and service names unless the requested change requires otherwise.
+- Do not assume every target is Dockerised.
+- Avoid introducing deployment-only dependencies into core application logic.
+- Keep local development possible where the existing project supports it.
+
+## Agent behaviour
+
+- Make the smallest coherent change that fully satisfies the current DEV item.
+- Prefer implementation over speculative redesign.
+- Use repository evidence as the source of truth.
+- If documentation and code disagree, identify the mismatch and update the appropriate source.
+- Do not invent completed work, test results, files, endpoints, integrations, CI status or merge state.
+- When work spans phases, complete and verify the current dependency before starting dependent work.
+- Do not stop merely because one implementation sub-step finished if the current DEV item remains incomplete.
+- If two attempted fixes fail for the same underlying problem, perform root-cause analysis before another patch.
+- Preserve enough state for another agent to resume safely.
 
 ## Development completion evidence
 
-For every meaningful feature or bug fix, create or update its entry in `DEVELOPMENT.md`.
+For every meaningful feature, bug fix, development idea or integration task:
 
-Use only these states where applicable: PLANNED, IN PROGRESS, BLOCKED, AWAITING ACCEPTANCE, COMPLETE, DEFERRED.
+- create or update its entry in `DEVELOPMENT.md`;
+- keep PLANNED / IN PROGRESS / BLOCKED / AWAITING ACCEPTANCE / COMPLETE / DEFERRED truthful;
+- record owner, branch, dependencies and integration status;
+- record implementation files, tests, validation, CI and commit/PR evidence where applicable;
+- separate development completion from user/business/external acceptance.
 
-Never mark a coding task COMPLETE merely because an agent says it is complete. Verify repository evidence:
-- implementation exists;
-- relevant files changed;
-- a non-empty diff or equivalent evidence exists;
-- tests exist or the reason for no test is recorded;
+Never mark a coding task COMPLETE merely because an agent says it is complete.
+
+Before marking COMPLETE, verify all applicable evidence:
+
+- requested implementation exists;
+- expected files changed;
+- meaningful diff or equivalent implementation evidence exists;
+- write/edit activity occurred where a code change was expected;
+- branch HEAD changed where a code change was expected;
+- relevant tests were added/updated or a no-test reason is recorded;
 - relevant tests pass;
-- CI passes where available;
-- commit/PR evidence is recorded;
-- merge status is recorded where required;
-- external/user acceptance is kept separate.
+- build/lint/type-check/migration/other validation passes where applicable;
+- CI passes where applicable;
+- commit/PR evidence exists;
+- merge/integration status is correct;
+- post-merge verification is complete where applicable;
+- acceptance criteria have been checked independently of CI;
+- external/user acceptance is recorded separately.
 
-An empty result, no write/edit action, unchanged branch HEAD, empty diff, or missing requested validation means the task is not complete.
+An empty result, no write/edit action, unchanged branch HEAD, empty diff, missing requested validation, or budget exhaustion before acceptance criteria are satisfied means the task is **not complete**.
 
-When documentation conflicts with code, tests, Git history or CI, repository evidence wins.
+Green CI alone does not prove feature completion.
+
+## CI and merge handling
+
+Treat implementation, local validation, CI, acceptance, merge and post-merge verification as separate gates.
+
+Before merge, review the complete diff against the DEV requirement and check for:
+
+- unintended debug/temporary files;
+- secrets;
+- failing tests/build/lint/type-check;
+- migration/deployment implications;
+- stale documentation;
+- unmet acceptance criteria.
+
+After merge, verify the expected change exists on the intended target branch and record the resulting evidence in `DEVELOPMENT.md`.
+
+## Recovery and interrupted work
+
+If work is interrupted, blocked, budget-exhausted or otherwise incomplete, update `DEVELOPMENT.md` with:
+
+- what was completed;
+- what remains;
+- the blocker;
+- validation already performed;
+- safest continuation point;
+- next recommended action.
+
+Do not turn partial work into COMPLETE for convenience.
+
+When documentation conflicts with code, tests, Git history or CI, treat repository evidence as authoritative and reconcile the documentation.
