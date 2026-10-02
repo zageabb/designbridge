@@ -38,6 +38,13 @@ DEV-018 evidence:
 - Merged to `main` as `ba66a3f1ed41dc6fd4db1a0f2fa7f7a04d743c63`.
 - Post-merge verification confirmed revision-token storage, `diverged` status, and token-required writes on `main`.
 
+DEV-019 integration evidence so far:
+
+- PR #20 is open.
+- CI run #233 passed on the implementation head.
+- Pre-merge review found no blocker.
+- Merge and post-merge verification are still required before COMPLETE.
+
 Do not automatically convert existing component sets into native VariantContainers until discovery/mapping behavior is proven safe.
 
 ## Development rules
