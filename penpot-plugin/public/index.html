@@ -61,7 +61,7 @@
 const input=document.getElementById("json"), status=document.getElementById("status"), selectionStatus=document.getElementById("selectionStatus");
 const apiUrl=document.getElementById("apiUrl"),syncStatus=document.getElementById("syncStatus"),projectIdEl=document.getElementById("projectId"),revisionState=document.getElementById("revisionState");
 const updateBadge=document.getElementById("updateBadge"),latestSummary=document.getElementById("latestSummary"),diffSummary=document.getElementById("diffSummary"),selectivePull=document.getElementById("selectivePull"),conflictSummary=document.getElementById("conflictSummary"),documentSummary=document.getElementById("documentSummary"),componentSummary=document.getElementById("componentSummary"),definitionSummary=document.getElementById("definitionSummary"),variantSummary=document.getElementById("variantSummary");
-let lastSelection=[],projectId=null,localRevision=null,localRevisionToken=null,currentRevision=null,currentRevisionToken=null,statusTimer=null,lastDiff=null,linkedSnapshotResolver=null,documentSnapshotResolver=null,lastLinkedSnapshots=[],lastVariantReport=null,variantSwitchResolver=null;
+let lastSelection=[],projectId=null,localRevision=null,localRevisionToken=null,currentRevision=null,currentRevisionToken=null,statusTimer=null,lastDiff=null,linkedSnapshotResolver=null,documentSnapshotResolver=null,lastLinkedSnapshots=[],lastVariantReport=null,lastNativeVariants=[],lastNativeVariantReport=null,nativeVariantResolver=null,variantSwitchResolver=null;
 try{
   const remembered=localStorage.getItem("designbridge:api-url");
   if(remembered)apiUrl.value=remembered;
@@ -173,7 +173,19 @@ function renderDiff(data){
 
 
 
-function requestVariantSwap(instanceId,targetComponentId,remappedOverrides){
+function requestNativeVariants(){
+  return new Promise((resolve,reject)=>{
+    nativeVariantResolver=resolve;
+    parent.postMessage({type:"designbridge:get-native-variants"},"*");
+    setTimeout(()=>{
+      if(nativeVariantResolver){
+        nativeVariantResolver=null;
+        reject(new Error("Timed out waiting for Penpot native variant metadata."));
+      }
+    },3000);
+  });
+}
+function requestVariantSwap(instanceId,targetComponentId,remappedOverrides,switchStrategy=null){
   return new Promise((resolve,reject)=>{
     const requestId="variant-"+Date.now()+"-"+Math.random().toString(16).slice(2);
     variantSwitchResolver={requestId,resolve,reject};
@@ -182,7 +194,8 @@ function requestVariantSwap(instanceId,targetComponentId,remappedOverrides){
       request_id:requestId,
       instance_id:instanceId,
       target_component_id:targetComponentId,
-      remapped_overrides:remappedOverrides||{}
+      remapped_overrides:remappedOverrides||{},
+      switch_strategy:switchStrategy
     },"*");
     setTimeout(()=>{
       if(variantSwitchResolver&&variantSwitchResolver.requestId===requestId){
@@ -194,20 +207,29 @@ function requestVariantSwap(instanceId,targetComponentId,remappedOverrides){
 }
 function renderVariantReport(data){
   lastVariantReport=data.variants||{};
+  lastNativeVariantReport=data.native_report||{};
   const groups=new Map((lastVariantReport.groups||[]).map(group=>[group.variant_group,group]));
+  const nativeGroups=new Map((lastNativeVariantReport.groups||[]).map(group=>[group.variant_group,group]));
   const rows=[];
   for(const item of lastVariantReport.instances||[]){
     const group=groups.get(item.variant_group);
+    const native=nativeGroups.get(item.variant_group);
+    const nativeLabel=native?.status==="in_sync"
+      ?"native Penpot variant"
+      :"component-swap fallback";
     const options=(group?.components||[])
       .filter(component=>component.component_id!==item.component_id)
       .map(component=>"<option value='"+component.component_id+"'>"+component.name+" · "+JSON.stringify(component.properties||{})+"</option>")
       .join("");
     rows.push("<div style='margin:7px 0'><strong>"+item.instance_id+"</strong> · "+item.variant_group+" · "+JSON.stringify(item.variant_properties||{})+
+      "<br><span class='muted'>switch path: "+nativeLabel+(native?.issues?.length?" · "+native.issues.join("; "):"")+"</span>"+
       (options?"<br><select class='variantTarget' data-instance='"+item.instance_id+"' style='margin-top:4px;background:#20262b;color:#f4f5f6;border:1px solid #3a444d;border-radius:4px;padding:4px'><option value=''>Choose target…</option>"+options+"</select> <button class='switchVariant' data-instance='"+item.instance_id+"'>Switch</button>":"<br><span class='muted'>No alternate variants.</span>")+"</div>");
   }
   const summary=lastVariantReport.summary||{};
+  const nativeSummary=lastNativeVariantReport.summary||{};
   variantSummary.style.display="block";
   variantSummary.innerHTML="<div class='muted' style='margin:0 0 6px'>Variants: "+(summary.variant_groups||0)+" group(s) · "+(summary.variant_components||0)+" component(s) · "+(summary.variant_instances||0)+" instance(s)</div>"+
+    "<div class='muted' style='margin:0 0 6px'>Native Penpot mapping: "+(nativeSummary.native_mapped||0)+" mapped · "+(nativeSummary.absent||0)+" absent · "+(nativeSummary.mismatch||0)+" mismatched · "+(nativeSummary.ambiguous||0)+" ambiguous</div>"+
     (rows.join("")||"<div>No canonical variant families.</div>");
   for(const button of variantSummary.querySelectorAll(".switchVariant")){
     button.onclick=()=>switchVariant(button.dataset.instance);
@@ -216,9 +238,15 @@ function renderVariantReport(data){
 async function reviewVariants(){
   try{
     if(!projectId)throw new Error("This file is not linked to DesignBridge.");
+    lastNativeVariants=await requestNativeVariants();
     const data=await api("/api/penpot/projects/"+encodeURIComponent(projectId)+"/variants");
-    renderVariantReport(data);
-    syncStatus.textContent="Variant review complete.";
+    const mapping=await api(
+      "/api/penpot/projects/"+encodeURIComponent(projectId)+"/native-variant-report",
+      {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({native_variants:lastNativeVariants})}
+    );
+    renderVariantReport({...data,native_report:mapping.report});
+    const nativeCount=mapping.report?.summary?.native_mapped||0;
+    syncStatus.textContent="Variant review complete: "+nativeCount+" native Penpot family/families mapped.";
   }catch(error){
     syncStatus.textContent="Variant review failed: "+error.message;
   }
@@ -237,7 +265,8 @@ async function switchVariant(instanceId){
       "/api/penpot/projects/"+encodeURIComponent(projectId)+"/variant-switch-plan",
       {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
         instance_id:instanceId,
-        target_component_id:targetComponentId
+        target_component_id:targetComponentId,
+        native_variants:lastNativeVariants
       })}
     );
     const plan=planned.plan||{};
@@ -252,7 +281,12 @@ async function switchVariant(instanceId){
       throw new Error("DesignBridge revision identity changed. Reconcile before switching variants.");
     }
 
-    await requestVariantSwap(instanceId,targetComponentId,plan.remapped_overrides||{});
+    const switched=await requestVariantSwap(
+      instanceId,
+      targetComponentId,
+      plan.remapped_overrides||{},
+      plan.switch_strategy||null
+    );
 
     try{
       const committed=await api(
@@ -268,7 +302,7 @@ async function switchVariant(instanceId){
       input.value=JSON.stringify(committed.document,null,2);
       setRevision(committed.revision,committed.revision_token);
       currentRevision=committed.revision;
-      syncStatus.textContent="Switched "+instanceId+" to "+targetComponentId+" in revision "+committed.revision+".";
+      syncStatus.textContent="Switched "+instanceId+" to "+targetComponentId+" via "+(switched?.strategy||"component_swap")+" in revision "+committed.revision+".";
       await refreshStatus();
       await reviewVariants();
     }catch(commitError){
@@ -735,6 +769,14 @@ window.addEventListener("message",event=>{
     selectionStatus.textContent=linked.length
       ? "Selected: "+linked.map(item=>item.name+" ["+item.designbridge_id+"]").join(", ")
       : "Selection has no DesignBridge-linked shapes.";
+    return;
+  }
+  if(message?.type==="designbridge:native-variants"){
+    if(nativeVariantResolver){
+      const resolve=nativeVariantResolver;
+      nativeVariantResolver=null;
+      resolve(message.variants||[]);
+    }
     return;
   }
   if(message?.type==="designbridge:variant-switch-result"){
