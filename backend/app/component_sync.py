@@ -361,3 +361,186 @@ def component_definition_operations(
                 )
             )
     return operations
+
+
+def _variant_slot_index(component: DesignNode) -> dict[str, DesignNode]:
+    slots: dict[str, DesignNode] = {}
+
+    def walk(node: DesignNode) -> None:
+        if node.variant_slot:
+            slots[node.variant_slot] = node
+        for child in node.children:
+            walk(child)
+
+    for child in component.children:
+        walk(child)
+    return slots
+
+
+def variant_family_report(document: DesignBridgeDocument) -> dict[str, Any]:
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for component in document.components:
+        if not component.variant_group:
+            continue
+        groups.setdefault(component.variant_group, []).append({
+            "component_id": component.id,
+            "name": component.name,
+            "properties": component.variant_properties,
+            "slots": sorted(_variant_slot_index(component)),
+        })
+
+    instances: list[dict[str, Any]] = []
+    for node_id, node in _node_index(document).items():
+        if node.type != "instance":
+            continue
+        component = next(
+            (item for item in document.components if item.id == node.component_id),
+            None,
+        )
+        if component is None or not component.variant_group:
+            continue
+        instances.append({
+            "instance_id": node_id,
+            "component_id": node.component_id,
+            "variant_group": component.variant_group,
+            "variant_properties": component.variant_properties,
+            "overrides": node.overrides,
+        })
+
+    return {
+        "summary": {
+            "variant_groups": len(groups),
+            "variant_components": sum(len(items) for items in groups.values()),
+            "variant_instances": len(instances),
+        },
+        "groups": [
+            {
+                "variant_group": group_id,
+                "components": sorted(items, key=lambda item: item["component_id"]),
+            }
+            for group_id, items in sorted(groups.items())
+        ],
+        "instances": sorted(instances, key=lambda item: item["instance_id"]),
+    }
+
+
+def plan_variant_switch(
+    document: DesignBridgeDocument,
+    instance_id: str,
+    target_component_id: str,
+) -> dict[str, Any]:
+    nodes = _node_index(document)
+    instance = nodes.get(instance_id)
+    if instance is None or instance.type != "instance":
+        raise ValueError(f"unknown instance_id: {instance_id}")
+
+    components = {item.id: item for item in document.components}
+    source = components.get(instance.component_id or "")
+    target = components.get(target_component_id)
+    if source is None or target is None:
+        raise ValueError("source or target component not found")
+    if not source.variant_group or source.variant_group != target.variant_group:
+        raise ValueError("variant switch requires source and target in the same variant_group")
+    if source.id == target.id:
+        raise ValueError("target component is already active")
+
+    source_children = _component_children(source)
+    source_slots = _variant_slot_index(source)
+    target_slots = _variant_slot_index(target)
+    source_slot_by_id = {
+        node.id: slot for slot, node in source_slots.items()
+    }
+
+    issues: list[dict[str, Any]] = []
+    remapped: dict[str, dict[str, Any]] = {}
+
+    for child_id, values in instance.overrides.items():
+        source_child = source_children.get(child_id)
+        slot = source_slot_by_id.get(child_id)
+        if source_child is None:
+            issues.append({
+                "child_id": child_id,
+                "reason": "override source child does not exist in source component",
+            })
+            continue
+        if not slot:
+            issues.append({
+                "child_id": child_id,
+                "reason": "override source child has no variant_slot",
+            })
+            continue
+        target_child = target_slots.get(slot)
+        if target_child is None:
+            issues.append({
+                "child_id": child_id,
+                "variant_slot": slot,
+                "reason": "target variant is missing the override slot",
+            })
+            continue
+        if source_child.type != target_child.type:
+            issues.append({
+                "child_id": child_id,
+                "variant_slot": slot,
+                "reason": f"slot type mismatch: {source_child.type} -> {target_child.type}",
+            })
+            continue
+
+        supported_values: dict[str, Any] = {}
+        for property_name, value in values.items():
+            if property_name == "text" and target_child.type != "text":
+                issues.append({
+                    "child_id": child_id,
+                    "variant_slot": slot,
+                    "property": property_name,
+                    "reason": "target slot does not support text override",
+                })
+                continue
+            if property_name == "fill" and target_child.fill_token is not None:
+                issues.append({
+                    "child_id": child_id,
+                    "variant_slot": slot,
+                    "property": property_name,
+                    "reason": "target slot is token-bound and cannot accept direct fill override",
+                })
+                continue
+            supported_values[property_name] = value
+
+        if supported_values:
+            remapped[target_child.id] = supported_values
+
+    return {
+        "instance_id": instance_id,
+        "source_component_id": source.id,
+        "target_component_id": target.id,
+        "variant_group": source.variant_group,
+        "source_properties": source.variant_properties,
+        "target_properties": target.variant_properties,
+        "compatible": not issues,
+        "issues": issues,
+        "remapped_overrides": remapped,
+    }
+
+
+def variant_switch_operation(
+    document: DesignBridgeDocument,
+    instance_id: str,
+    target_component_id: str,
+) -> tuple[DesignOperation, dict[str, Any]]:
+    plan = plan_variant_switch(document, instance_id, target_component_id)
+    if not plan["compatible"]:
+        raise ValueError(
+            "variant switch is incompatible: "
+            + "; ".join(item["reason"] for item in plan["issues"])
+        )
+    return (
+        DesignOperation(
+            action="update_node",
+            node_id=instance_id,
+            changes={
+                "component_id": target_component_id,
+                "variant_group": plan["variant_group"],
+                "overrides": plan["remapped_overrides"],
+            },
+        ),
+        plan,
+    )
