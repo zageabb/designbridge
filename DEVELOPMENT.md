@@ -231,7 +231,7 @@ Owner/Agent: ChatGPT
 Branch: `feature/v0.19-native-penpot-variants`  
 Depends on: DEV-018 complete  
 Can run in parallel with: unrelated documentation or non-component adapter work  
-Integration status: implementation in progress
+Integration status: ready for integration
 
 Requirement:
 Discover Penpot-native variant families, map them to canonical DesignBridge variant groups/properties, and use Penpot's native variant switching when the mapping is safe, while retaining the existing component-swap fallback.
@@ -255,8 +255,8 @@ Evidence:
 - Files: `backend/app/component_sync.py`, `backend/app/main.py`, `penpot-plugin/public/plugin.js`, `penpot-plugin/public/index.html`.
 - Tests: `backend/tests/test_component_sync.py`, `backend/tests/test_designbridge.py`.
 - Documentation: `docs/V0.19_NATIVE_PENPOT_VARIANTS.md`.
-- CI: pending.
-- PR: pending.
+- CI: GitHub Actions run #233 passed.
+- PR: #20.
 - Merged to intended branch: no.
 - Post-merge verification: pending.
 
@@ -268,7 +268,7 @@ Completion criteria:
 - [x] Override compatibility planning remains enforced before either switch mechanism.
 - [x] Revision fingerprint protections remain enforced.
 - [x] Tests cover native mapping, native selection, and fallback behavior.
-- [ ] CI passes.
+- [x] CI passes.
 - [ ] PR is merged to `main`.
 - [ ] Post-merge verification is recorded.
 
