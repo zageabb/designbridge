@@ -23,7 +23,7 @@ from .revision_diff import compare_documents, selective_pull_plan
 from .storage import DesignStore
 from .three_way import resolution_plan, three_way_review
 
-app = FastAPI(title="DesignBridge API", version="0.17.0")
+app = FastAPI(title="DesignBridge API", version="0.18.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -42,9 +42,55 @@ DATA_ROOT = ROOT / "data"
 STORE = DesignStore(DATA_ROOT / "designbridge.db")
 
 
+def _require_current_identity(current: dict, payload: dict) -> None:
+    expected_revision = payload.get("expected_revision")
+    expected_token = str(payload.get("expected_revision_token") or "").strip()
+    if expected_revision is None:
+        raise ValueError("expected_revision is required")
+    if not expected_token:
+        raise ValueError("expected_revision_token is required")
+
+    revision_matches = int(expected_revision) == int(current["revision"])
+    token_matches = expected_token == current["revision_token"]
+    if not revision_matches or not token_matches:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "revision_diverged" if revision_matches else "revision_conflict",
+                "message": (
+                    "Penpot revision number matches but content fingerprint differs"
+                    if revision_matches
+                    else "Penpot is based on a different DesignBridge revision"
+                ),
+                "expected_revision": int(expected_revision),
+                "current_revision": int(current["revision"]),
+                "expected_revision_token": expected_token,
+                "current_revision_token": current["revision_token"],
+            },
+        )
+
+
+def _require_base_identity(base: dict, payload: dict) -> None:
+    expected_token = str(payload.get("from_revision_token") or "").strip()
+    if not expected_token:
+        raise ValueError("from_revision_token is required")
+    if expected_token != base["revision_token"]:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "revision_diverged",
+                "message": "The supplied base revision number exists but its content fingerprint differs",
+                "revision": int(base["revision"]),
+                "expected_revision_token": expected_token,
+                "current_revision_token": base["revision_token"],
+            },
+        )
+
+
+
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "service": "designbridge", "version": "0.17.0"}
+    return {"status": "ok", "service": "designbridge", "version": "0.18.0"}
 
 
 @app.post("/api/validate")
@@ -145,6 +191,7 @@ def penpot_current_project(project_id: str) -> dict:
     return {
         "project_id": project_id,
         "revision": result["revision"],
+        "revision_token": result["revision_token"],
         "description": result["description"],
         "created_at": result["created_at"],
         "document": result["document"].model_dump(mode="json", exclude_none=True),
@@ -152,26 +199,39 @@ def penpot_current_project(project_id: str) -> dict:
 
 
 @app.get("/api/penpot/projects/{project_id}/status")
-def penpot_project_status(project_id: str, local_revision: int | None = None) -> dict:
+def penpot_project_status(
+    project_id: str,
+    local_revision: int | None = None,
+    local_revision_token: str | None = None,
+) -> dict:
     try:
         current = STORE.load(project_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="project not found")
 
     current_revision = int(current["revision"])
+    current_token = current["revision_token"]
+    local_token = (local_revision_token or "").strip() or None
+
     if local_revision is None:
         state = "unknown"
-    elif local_revision == current_revision:
-        state = "in_sync"
     elif local_revision < current_revision:
         state = "behind"
-    else:
+    elif local_revision > current_revision:
         state = "ahead"
+    elif local_token is None:
+        state = "unverified"
+    elif local_token == current_token:
+        state = "in_sync"
+    else:
+        state = "diverged"
 
     return {
         "project_id": project_id,
         "local_revision": local_revision,
+        "local_revision_token": local_token,
         "current_revision": current_revision,
+        "current_revision_token": current_token,
         "state": state,
         "updated_at": current["created_at"],
         "description": current["description"],
@@ -196,6 +256,8 @@ def penpot_project_diff(
         "to_revision": after["revision"],
         "from_description": before["description"],
         "to_description": after["description"],
+        "from_revision_token": before["revision_token"],
+        "to_revision_token": after["revision_token"],
         "diff": compare_documents(before["document"], after["document"]),
     }
 
@@ -210,6 +272,7 @@ def penpot_variant_families(project_id: str) -> dict:
     return {
         "project_id": project_id,
         "revision": current["revision"],
+        "revision_token": current["revision_token"],
         "variants": variant_family_report(current["document"]),
     }
 
@@ -238,6 +301,7 @@ def penpot_variant_switch_plan(project_id: str, payload: dict) -> dict:
     return {
         "project_id": project_id,
         "revision": current["revision"],
+        "revision_token": current["revision_token"],
         "plan": plan,
     }
 
@@ -246,19 +310,7 @@ def penpot_variant_switch_plan(project_id: str, payload: dict) -> dict:
 def penpot_commit_variant_switch(project_id: str, payload: dict) -> dict:
     try:
         current = STORE.load(project_id)
-        expected_revision = payload.get("expected_revision")
-        if expected_revision is None:
-            raise ValueError("expected_revision is required")
-        if int(expected_revision) != int(current["revision"]):
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "revision_conflict",
-                    "message": "DesignBridge changed before the variant switch could be committed",
-                    "expected_revision": int(expected_revision),
-                    "current_revision": int(current["revision"]),
-                },
-            )
+        _require_current_identity(current, payload)
 
         instance_id = str(payload["instance_id"])
         target_component_id = str(payload["target_component_id"])
@@ -298,6 +350,7 @@ def penpot_commit_variant_switch(project_id: str, payload: dict) -> dict:
     return {
         "project_id": project_id,
         "revision": saved["revision"],
+        "revision_token": saved["revision_token"],
         "plan": plan,
         "document": applied.document.model_dump(mode="json", exclude_none=True),
         "changes": applied.changes,
@@ -318,6 +371,7 @@ def penpot_component_definitions(project_id: str, payload: dict) -> dict:
     return {
         "project_id": project_id,
         "revision": current["revision"],
+        "revision_token": current["revision_token"],
         "report": report,
     }
 
@@ -326,19 +380,7 @@ def penpot_component_definitions(project_id: str, payload: dict) -> dict:
 def penpot_capture_component_definitions(project_id: str, payload: dict) -> dict:
     try:
         current = STORE.load(project_id)
-        expected_revision = payload.get("expected_revision")
-        if expected_revision is None:
-            raise ValueError("expected_revision is required")
-        if int(expected_revision) != int(current["revision"]):
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "revision_conflict",
-                    "message": "Penpot is based on an older DesignBridge revision",
-                    "expected_revision": int(expected_revision),
-                    "current_revision": int(current["revision"]),
-                },
-            )
+        _require_current_identity(current, payload)
 
         snapshots = [dict(item) for item in payload.get("snapshots", [])]
         component_ids = [str(item) for item in payload.get("component_ids", [])]
@@ -352,6 +394,7 @@ def penpot_capture_component_definitions(project_id: str, payload: dict) -> dict
             return {
                 "project_id": project_id,
                 "revision": current["revision"],
+                "revision_token": current["revision_token"],
                 "changed": False,
                 "document": current["document"].model_dump(mode="json", exclude_none=True),
             }
@@ -382,6 +425,7 @@ def penpot_capture_component_definitions(project_id: str, payload: dict) -> dict
     return {
         "project_id": project_id,
         "revision": saved["revision"],
+        "revision_token": saved["revision_token"],
         "changed": True,
         "document": applied.document.model_dump(mode="json", exclude_none=True),
         "changes": applied.changes,
@@ -402,6 +446,7 @@ def penpot_component_report(project_id: str, payload: dict) -> dict:
     return {
         "project_id": project_id,
         "revision": current["revision"],
+        "revision_token": current["revision_token"],
         "report": report,
     }
 
@@ -410,19 +455,7 @@ def penpot_component_report(project_id: str, payload: dict) -> dict:
 def penpot_capture_instance_overrides(project_id: str, payload: dict) -> dict:
     try:
         current = STORE.load(project_id)
-        expected_revision = payload.get("expected_revision")
-        if expected_revision is None:
-            raise ValueError("expected_revision is required")
-        if int(expected_revision) != int(current["revision"]):
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "revision_conflict",
-                    "message": "Penpot is based on an older DesignBridge revision",
-                    "expected_revision": int(expected_revision),
-                    "current_revision": int(current["revision"]),
-                },
-            )
+        _require_current_identity(current, payload)
 
         snapshots = [dict(item) for item in payload.get("snapshots", [])]
         instance_ids = [str(item) for item in payload.get("instance_ids", [])]
@@ -456,6 +489,7 @@ def penpot_capture_instance_overrides(project_id: str, payload: dict) -> dict:
             return {
                 "project_id": project_id,
                 "revision": current["revision"],
+                "revision_token": current["revision_token"],
                 "changed": False,
                 "captured": desired,
                 "document": current["document"].model_dump(mode="json", exclude_none=True),
@@ -487,6 +521,7 @@ def penpot_capture_instance_overrides(project_id: str, payload: dict) -> dict:
     return {
         "project_id": project_id,
         "revision": saved["revision"],
+        "revision_token": saved["revision_token"],
         "changed": True,
         "captured": desired,
         "document": applied.document.model_dump(mode="json", exclude_none=True),
@@ -498,6 +533,7 @@ def penpot_document_reconciliation(project_id: str, payload: dict) -> dict:
     try:
         from_revision = int(payload["from_revision"])
         base = STORE.load(project_id, from_revision)
+        _require_base_identity(base, payload)
         latest = STORE.load(project_id)
         snapshots = [dict(item) for item in payload.get("snapshots", [])]
         reconciliation = reconcile_document(
@@ -515,7 +551,9 @@ def penpot_document_reconciliation(project_id: str, payload: dict) -> dict:
     return {
         "project_id": project_id,
         "from_revision": base["revision"],
+        "from_revision_token": base["revision_token"],
         "to_revision": latest["revision"],
+        "to_revision_token": latest["revision_token"],
         "reconciliation": reconciliation,
     }
 
@@ -525,6 +563,7 @@ def penpot_three_way_review(project_id: str, payload: dict) -> dict:
     try:
         from_revision = int(payload["from_revision"])
         base = STORE.load(project_id, from_revision)
+        _require_base_identity(base, payload)
         latest = STORE.load(project_id)
         snapshots = [
             PenpotShapeSnapshot.model_validate(item)
@@ -546,7 +585,9 @@ def penpot_three_way_review(project_id: str, payload: dict) -> dict:
     return {
         "project_id": project_id,
         "from_revision": base["revision"],
+        "from_revision_token": base["revision_token"],
         "to_revision": latest["revision"],
+        "to_revision_token": latest["revision_token"],
         "review": review,
     }
 
@@ -556,6 +597,7 @@ def penpot_resolve_properties(project_id: str, payload: dict) -> dict:
     try:
         from_revision = int(payload["from_revision"])
         base = STORE.load(project_id, from_revision)
+        _require_base_identity(base, payload)
         latest = STORE.load(project_id)
         snapshots = [
             PenpotShapeSnapshot.model_validate(item)
@@ -615,7 +657,9 @@ def penpot_resolve_properties(project_id: str, payload: dict) -> dict:
         "project_id": project_id,
         "from_revision": base["revision"],
         "latest_revision": latest["revision"],
+        "latest_revision_token": latest["revision_token"],
         "final_revision": final_revision,
+        "final_revision_token": saved["revision_token"] if saved else latest["revision_token"],
         "complete": plan["complete"],
         "resolved": plan["resolved"],
         "unresolved": plan["unresolved"],
@@ -632,6 +676,7 @@ def penpot_selective_pull(project_id: str, payload: dict) -> dict:
         from_revision = int(payload["from_revision"])
         node_ids = [str(item) for item in payload.get("node_ids", [])]
         before = STORE.load(project_id, from_revision)
+        _require_base_identity(before, payload)
         after = STORE.load(project_id)
         plan = selective_pull_plan(before["document"], after["document"], node_ids)
     except KeyError as exc:
@@ -644,7 +689,9 @@ def penpot_selective_pull(project_id: str, payload: dict) -> dict:
     return {
         "project_id": project_id,
         "from_revision": before["revision"],
+        "from_revision_token": before["revision_token"],
         "to_revision": after["revision"],
+        "to_revision_token": after["revision_token"],
         **plan,
     }
 
@@ -653,19 +700,7 @@ def penpot_selective_pull(project_id: str, payload: dict) -> dict:
 def penpot_sync_selection(project_id: str, payload: dict) -> dict:
     try:
         current = STORE.load(project_id)
-        expected_revision = payload.get("expected_revision")
-        if expected_revision is None:
-            raise ValueError("expected_revision is required")
-        if int(expected_revision) != int(current["revision"]):
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "revision_conflict",
-                    "message": "Penpot is based on an older DesignBridge revision",
-                    "expected_revision": int(expected_revision),
-                    "current_revision": int(current["revision"]),
-                },
-            )
+        _require_current_identity(current, payload)
         document = current["document"]
         snapshots = [
             PenpotShapeSnapshot.model_validate(item)
@@ -692,6 +727,7 @@ def penpot_sync_selection(project_id: str, payload: dict) -> dict:
     return {
         "project_id": project_id,
         "revision": saved["revision"],
+        "revision_token": saved["revision_token"],
         "batch": batch.model_dump(mode="json", exclude_none=True),
         "document": preview.document.model_dump(mode="json", exclude_none=True),
         "changes": preview.changes,

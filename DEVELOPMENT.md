@@ -116,13 +116,13 @@ Completion criteria:
 
 ### DEV-017 — Component variants and safe switching
 
-Status: 🔨 IN PROGRESS  
+Status: ✅ COMPLETE  
 Priority: High  
 Owner/Agent: ChatGPT  
 Branch: `feature/v0.17-component-variants-rebased`  
 Depends on: v0.16 component definition synchronization  
 Can run in parallel with: documentation/process work that does not modify component/variant sync code  
-Integration status: ready for CI / not yet merged
+Integration status: verified on target branch
 
 Requirement:
 Represent component variant families canonically and allow safe Penpot instance switching without silently losing compatible instance overrides.
@@ -148,9 +148,10 @@ Evidence:
 - Files: `backend/app/models.py`, `backend/app/component_sync.py`, `backend/app/main.py`, `penpot-plugin/public/plugin.js`, `penpot-plugin/public/index.html`.
 - Tests: `backend/tests/test_component_sync.py`, `backend/tests/test_designbridge.py`.
 - Documentation: `docs/V0.17_COMPONENT_VARIANTS.md`.
-- CI for rebased branch: pending.
-- Merged to intended branch: no.
-- Post-merge verification: pending.
+- Rebased CI: GitHub Actions run #204 passed.
+- Merged to intended branch: yes, `main`.
+- Merge commit: `8113b9d482810fc1a7ed47051296ae740be3bc27`.
+- Post-merge verification: `DEVELOPMENT.md` contains DEV-017 and `backend/app/models.py` contains `variant_slot` on `main`.
 - User/business/external acceptance: separate from development completion.
 
 Completion criteria:
@@ -161,12 +162,65 @@ Completion criteria:
 - [x] Penpot switch precedes canonical commit.
 - [x] Rollback is attempted on final revision race.
 - [x] Material behavior is covered by tests.
-- [ ] Rebased branch CI passes.
+- [x] Rebased branch CI passes.
+- [x] PR is merged to `main`.
+- [x] Post-merge verification is recorded.
+
+Notes:
+Native Penpot VariantContainer discovery and `switchVariant(...)` integration remain follow-up work. The current implementation uses safe component swaps for canonical variant families.
+
+### DEV-018 — Durable revision fingerprints
+
+Status: 🔨 IN PROGRESS  
+Priority: Critical  
+Owner/Agent: ChatGPT  
+Branch: `feature/v0.18-revision-fingerprint`  
+Depends on: DEV-017 integrated  
+Can run in parallel with: non-sync documentation work only  
+Integration status: implementation and regression tests in progress
+
+Requirement:
+Prevent reused numeric revision numbers from being mistaken for synchronized state after undo followed by a new divergent save.
+
+Implementation:
+- Added deterministic SHA-256 revision fingerprints derived from canonical sorted DesignBridge JSON.
+- Added `revision_token` storage on revision rows.
+- Added SQLite migration/backfill for legacy revision rows.
+- `save`, `load`, and `history` expose revision tokens.
+- Penpot current/status APIs expose fingerprints.
+- Status distinguishes `in_sync`, `behind`, `ahead`, `unverified`, and `diverged`.
+- Same numeric revision with a different token becomes `diverged`.
+- Penpot stores `designbridge:revision-token` in plugin data.
+- Penpot sync UI sends tokens on writes and base-revision reconciliation requests.
+- Mutating Penpot APIs require both revision number and matching fingerprint.
+- Base-sensitive reconciliation APIs require `from_revision_token`.
+- Added regression coverage for legacy database backfill and reused revision numbers.
+
+Evidence:
+- Files: `backend/app/storage.py`, `backend/app/main.py`, `penpot-plugin/public/plugin.js`, `penpot-plugin/public/index.html`.
+- Tests: `backend/tests/test_revision_fingerprint.py`, updates to `backend/tests/test_designbridge.py`.
+- Branch commits include `59f9da5549ee3fa893345315f173487036bf0d88`, `c555885f046deff8ee28c058e8be9e7ac8db0f2f`, `511082958e3aa8e93f66bdb0cc2f49db72bd8b92`, `e830a940e884db24bf779a57a9cfedb9a8ab0514`, `46ac4bdcecbef300b7dbe5f5983b1866c195bb83`.
+- CI: pending.
+- PR: pending.
+- Merged to intended branch: no.
+- Post-merge verification: pending.
+
+Completion criteria:
+- [x] Revision token is deterministic.
+- [x] New revisions persist tokens.
+- [x] Legacy revisions are backfilled.
+- [x] Current/status APIs expose tokens.
+- [x] Same-number/different-content state reports `diverged`.
+- [x] Penpot persists revision tokens.
+- [x] Penpot writes require matching revision identity.
+- [x] Base-sensitive review/pull calls validate base token.
+- [x] Regression tests cover revision-number reuse.
+- [ ] CI passes.
 - [ ] PR is merged to `main`.
 - [ ] Post-merge verification is recorded.
 
 Notes:
-Native Penpot VariantContainer discovery and `switchVariant(...)` integration remain follow-up work. The current implementation uses safe component swaps for canonical variant families.
+This milestone intentionally hardens identity before additional structural/destructive synchronization work.
 
 ## New development item template
 

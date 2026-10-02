@@ -6,6 +6,12 @@ from app.main import app
 from app.models import DesignBridgeDocument
 
 
+def _revision_token(client: TestClient, revision: int = 1) -> str:
+    response = client.get(f"/api/projects/demo?revision={revision}")
+    assert response.status_code == 200
+    return response.json()["revision_token"]
+
+
 VALID = {
     "format": "designbridge",
     "version": "0.1",
@@ -383,6 +389,7 @@ def test_direct_penpot_pull_and_push(monkeypatch, tmp_path):
         "/api/penpot/projects/demo/selection",
         json={
             "expected_revision": 1,
+            "expected_revision_token": _revision_token(client, 1),
             "selection": [
                 {
                     "penpot_id": "shape-1",
@@ -417,7 +424,8 @@ def test_direct_penpot_push_requires_linked_shape(monkeypatch, tmp_path):
 
     response = client.post(
         "/api/penpot/projects/demo/selection",
-        json={"expected_revision": 1, "selection": [{"penpot_id": "shape-1", "name": "Unlinked"}]},
+        json={"expected_revision": 1,
+            "expected_revision_token": _revision_token(client, 1), "selection": [{"penpot_id": "shape-1", "name": "Unlinked"}]},
     )
     assert response.status_code == 422
 
@@ -437,7 +445,11 @@ def test_penpot_status_and_revision_conflict(monkeypatch, tmp_path):
     assert first.status_code == 200
     assert first.json()["revision"] == 1
 
-    status = client.get("/api/penpot/projects/demo/status?local_revision=1")
+    first_token = first.json()["revision_token"]
+    status = client.get(
+        "/api/penpot/projects/demo/status"
+        f"?local_revision=1&local_revision_token={first_token}"
+    )
     assert status.status_code == 200
     assert status.json()["state"] == "in_sync"
     assert status.json()["current_revision"] == 1
@@ -476,6 +488,7 @@ def test_penpot_status_and_revision_conflict(monkeypatch, tmp_path):
         "/api/penpot/projects/demo/selection",
         json={
             "expected_revision": 1,
+            "expected_revision_token": _revision_token(client, 1),
             "selection": [
                 {
                     "penpot_id": "shape-1",
@@ -514,6 +527,7 @@ def test_penpot_push_succeeds_with_matching_revision(monkeypatch, tmp_path):
         "/api/penpot/projects/demo/selection",
         json={
             "expected_revision": 1,
+            "expected_revision_token": _revision_token(client, 1),
             "selection": [
                 {
                     "penpot_id": "shape-1",
@@ -634,7 +648,8 @@ def test_penpot_selective_pull_endpoint(monkeypatch, tmp_path):
 
     partial = client.post(
         "/api/penpot/projects/demo/selective-pull",
-        json={"from_revision": 1, "node_ids": ["title"]},
+        json={"from_revision": 1,
+            "from_revision_token": _revision_token(client, 1), "node_ids": ["title"]},
     )
     assert partial.status_code == 200
     body = partial.json()
@@ -647,7 +662,8 @@ def test_penpot_selective_pull_endpoint(monkeypatch, tmp_path):
 
     full = client.post(
         "/api/penpot/projects/demo/selective-pull",
-        json={"from_revision": 1, "node_ids": ["frame", "title"]},
+        json={"from_revision": 1,
+            "from_revision_token": _revision_token(client, 1), "node_ids": ["frame", "title"]},
     )
     assert full.status_code == 200
     assert full.json()["can_advance_revision"] is True
@@ -675,7 +691,8 @@ def test_penpot_selective_pull_rejects_added_node(monkeypatch, tmp_path):
 
     response = client.post(
         "/api/penpot/projects/demo/selective-pull",
-        json={"from_revision": 1, "node_ids": ["new-label"]},
+        json={"from_revision": 1,
+            "from_revision_token": _revision_token(client, 1), "node_ids": ["new-label"]},
     )
     assert response.status_code == 422
 
@@ -707,6 +724,7 @@ def test_penpot_three_way_review_endpoint(monkeypatch, tmp_path):
         "/api/penpot/projects/demo/three-way-review",
         json={
             "from_revision": 1,
+            "from_revision_token": _revision_token(client, 1),
             "snapshots": [
                 {
                     "penpot_id": "shape-1",
@@ -755,6 +773,7 @@ def test_penpot_property_resolution_endpoint(monkeypatch, tmp_path):
         "/api/penpot/projects/demo/resolve-properties",
         json={
             "from_revision": 1,
+            "from_revision_token": _revision_token(client, 1),
             "snapshots": [
                 {
                     "penpot_id": "shape-1",
@@ -798,6 +817,7 @@ def test_penpot_property_resolution_remote_choice_does_not_create_revision(monke
         "/api/penpot/projects/demo/resolve-properties",
         json={
             "from_revision": 1,
+            "from_revision_token": _revision_token(client, 1),
             "snapshots": [
                 {
                     "designbridge_id": "title",
@@ -837,6 +857,7 @@ def test_penpot_document_reconciliation_endpoint(monkeypatch, tmp_path):
         "/api/penpot/projects/demo/document-reconciliation",
         json={
             "from_revision": 1,
+            "from_revision_token": _revision_token(client, 1),
             "snapshots": [
                 {
                     "designbridge_id": "title",
@@ -911,6 +932,7 @@ def test_penpot_capture_instance_overrides_endpoint(monkeypatch, tmp_path):
         "/api/penpot/projects/demo/capture-instance-overrides",
         json={
             "expected_revision": 1,
+            "expected_revision_token": _revision_token(client, 1),
             "instance_ids": ["card-instance"],
             "snapshots": [
                 {
@@ -956,6 +978,7 @@ def test_penpot_capture_instance_overrides_blocks_stale_revision(monkeypatch, tm
         "/api/penpot/projects/demo/capture-instance-overrides",
         json={
             "expected_revision": 0,
+            "expected_revision_token": _revision_token(client, 1),
             "instance_ids": ["card-instance"],
             "snapshots": [],
         },
@@ -1041,6 +1064,7 @@ def test_penpot_capture_component_definitions_endpoint(monkeypatch, tmp_path):
         "/api/penpot/projects/demo/capture-component-definitions",
         json={
             "expected_revision": 1,
+            "expected_revision_token": _revision_token(client, 1),
             "component_ids": ["card"],
             "snapshots": [
                 {
@@ -1090,6 +1114,7 @@ def test_penpot_capture_component_definitions_preserves_instance_overrides(monke
         "/api/penpot/projects/demo/capture-component-definitions",
         json={
             "expected_revision": 1,
+            "expected_revision_token": _revision_token(client, 1),
             "component_ids": ["card"],
             "snapshots": [
                 {
@@ -1131,6 +1156,7 @@ def test_penpot_capture_component_definitions_blocks_stale_revision(monkeypatch,
         "/api/penpot/projects/demo/capture-component-definitions",
         json={
             "expected_revision": 0,
+            "expected_revision_token": _revision_token(client, 1),
             "component_ids": ["card"],
             "snapshots": [],
         },
@@ -1265,6 +1291,7 @@ def test_penpot_commit_variant_switch_endpoint(monkeypatch, tmp_path):
         "/api/penpot/projects/demo/commit-variant-switch",
         json={
             "expected_revision": 1,
+            "expected_revision_token": _revision_token(client, 1),
             "instance_id": "card-instance",
             "target_component_id": "card-active",
         },
@@ -1300,6 +1327,7 @@ def test_penpot_commit_variant_switch_blocks_stale_revision(monkeypatch, tmp_pat
         "/api/penpot/projects/demo/commit-variant-switch",
         json={
             "expected_revision": 0,
+            "expected_revision_token": _revision_token(client, 1),
             "instance_id": "card-instance",
             "target_component_id": "card-active",
         },

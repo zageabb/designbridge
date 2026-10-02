@@ -183,6 +183,7 @@ async function importDocument(document) {
   }
   penpot.currentFile?.setPluginData("designbridge:document-id", document.document.id);
   penpot.currentFile?.setPluginData("designbridge:revision", "0");
+  penpot.currentFile?.setPluginData("designbridge:revision-token", "");
   return {
     pages: pages.length,
     components: componentMap.size,
@@ -413,6 +414,10 @@ penpot.ui.onMessage(async (message) => {
   if (message?.type === "designbridge:set-revision") {
     if (penpot.currentFile && Number.isFinite(Number(message.revision))) {
       penpot.currentFile.setPluginData("designbridge:revision", String(Number(message.revision)));
+      penpot.currentFile.setPluginData(
+        "designbridge:revision-token",
+        String(message.revision_token || "")
+      );
       sendContext();
     }
     return;
@@ -586,10 +591,13 @@ function sendSelection() {
 function sendContext() {
   const rawRevision = penpot.currentFile?.getPluginData("designbridge:revision") || null;
   const revision = rawRevision ? Number(rawRevision) : null;
+  const revisionToken =
+    penpot.currentFile?.getPluginData("designbridge:revision-token") || null;
   penpot.ui.sendMessage({
     type: "designbridge:context",
     project_id: penpot.currentFile?.getPluginData("designbridge:document-id") || null,
     revision: Number.isFinite(revision) ? revision : null,
+    revision_token: revisionToken,
     file_name: penpot.currentFile?.name || null,
     page_name: penpot.currentPage?.name || null
   });
