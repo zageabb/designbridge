@@ -142,7 +142,8 @@ Implementation:
 
 Evidence:
 - Original implementation CI: GitHub Actions run #174 passed on commit `af97201f078f81002f8743361b9b292ebb79be59`.
-- Original PR: #17.
+- Original PR: #17 (superseded after main diverged).
+- Active replacement PR: #18.
 - Rebased branch: `feature/v0.17-component-variants-rebased`.
 - Files: `backend/app/models.py`, `backend/app/component_sync.py`, `backend/app/main.py`, `penpot-plugin/public/plugin.js`, `penpot-plugin/public/index.html`.
 - Tests: `backend/tests/test_component_sync.py`, `backend/tests/test_designbridge.py`.
