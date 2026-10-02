@@ -22,18 +22,26 @@ Repository state is authoritative. Do not rely on chat history when Git, code, t
 
 ## Current DesignBridge development state
 
-Merged runtime capability is verified through v0.16.
+Merged runtime capability is verified through v0.17.
 
 Current active item:
 
-- DEV-017 — component variants and safe switching.
-- Branch: `feature/v0.17-component-variants-rebased`.
-- Original PR #17 became non-mergeable after newer process/documentation commits landed on `main`.
-- The runtime implementation has been rebased onto current `main`; active integration is PR #18 from the rebased branch.
-- Original v0.17 code CI passed in GitHub Actions run #174.
-- Rebased-branch CI and merge/post-merge verification remain required before DEV-017 can become COMPLETE.
+- DEV-018 — durable revision fingerprints.
+- Branch: `feature/v0.18-revision-fingerprint`.
+- Goal: eliminate false `in_sync` states when a numeric revision is reused with different content after undo/new-save branching.
+- Revision identity is now modeled as `revision number + SHA-256 revision token`.
+- Penpot must persist and send the token for writes and base-sensitive reconciliation.
+- Same revision number with a different token must report `diverged`.
+- Missing token on an otherwise matching revision is `unverified`, not `in_sync`.
+- CI, PR merge, and post-merge verification are still required before DEV-018 can be marked COMPLETE.
 
-After DEV-017 is integrated, the highest-priority architectural item is durable revision identity using a deterministic SHA-256 content/revision token. Do not add substantially more destructive synchronization before this integrity gap is addressed unless the user explicitly reprioritizes it.
+DEV-017 evidence:
+
+- Replacement PR #18 passed CI run #204.
+- Merged to `main` as `8113b9d482810fc1a7ed47051296ae740be3bc27`.
+- Post-merge verification confirmed the variant ledger entry and `variant_slot` schema on `main`.
+
+After DEV-018, native Penpot VariantContainer discovery/mapping can continue safely. Do not weaken revision-token enforcement merely to preserve compatibility with older plugin state; older files should become `unverified` and perform a pull/reconciliation to establish a fingerprint.
 
 ## Development rules
 
@@ -48,6 +56,22 @@ After DEV-017 is integrated, the highest-priority architectural item is durable 
 - Update README/docs/DEVELOPMENT when implementation changes make them inaccurate.
 - Clearly mark scaffolds, placeholders, limitations and unfinished features.
 - Stay within the current objective. Record unrelated improvements as follow-up DEV items rather than silently expanding scope.
+
+## Revision fingerprint rules
+
+Revision number alone is not a valid synchronization identity.
+
+- Every stored revision must have a deterministic SHA-256 `revision_token` derived from canonical sorted DesignBridge JSON.
+- Legacy databases must be migrated/backfilled without losing revision history.
+- Penpot stores the token as plugin data alongside the numeric revision.
+- Mutating Penpot requests must provide `expected_revision` and `expected_revision_token`.
+- Base-sensitive reconciliation must provide `from_revision` and `from_revision_token`.
+- Numeric match + token match = `in_sync`.
+- Numeric match + token mismatch = `diverged`.
+- Numeric match + no token = `unverified`.
+- Do not silently accept missing tokens for writes.
+- Do not derive trust from a revision number after undo/history truncation.
+- New sync features must preserve revision-token checks.
 
 ## DesignBridge-specific principles
 
