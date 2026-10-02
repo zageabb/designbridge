@@ -22,26 +22,23 @@ Repository state is authoritative. Do not rely on chat history when Git, code, t
 
 ## Current DesignBridge development state
 
-Merged runtime capability is verified through v0.17.
+Merged runtime capability is verified through v0.18.
 
 Current active item:
 
-- DEV-018 — durable revision fingerprints.
-- Branch: `feature/v0.18-revision-fingerprint`.
-- Goal: eliminate false `in_sync` states when a numeric revision is reused with different content after undo/new-save branching.
-- Revision identity is now modeled as `revision number + SHA-256 revision token`.
-- Penpot must persist and send the token for writes and base-sensitive reconciliation.
-- Same revision number with a different token must report `diverged`.
-- Missing token on an otherwise matching revision is `unverified`, not `in_sync`.
-- CI, PR merge, and post-merge verification are still required before DEV-018 can be marked COMPLETE.
+- DEV-019 — native Penpot variant integration.
+- Branch: `feature/v0.19-native-penpot-variants`.
+- Goal: discover/map Penpot-native variant families and use native `switchVariant(...)` when the canonical DesignBridge family maps safely.
+- Keep the existing guarded `swapComponent(...)` path as fallback for ordinary grouped components or mismatched native metadata.
+- Compatibility planning and revision fingerprint protection remain mandatory before any switch.
 
-DEV-017 evidence:
+DEV-018 evidence:
 
-- Replacement PR #18 passed CI run #204.
-- Merged to `main` as `8113b9d482810fc1a7ed47051296ae740be3bc27`.
-- Post-merge verification confirmed the variant ledger entry and `variant_slot` schema on `main`.
+- PR #19 passed CI run #218.
+- Merged to `main` as `ba66a3f1ed41dc6fd4db1a0f2fa7f7a04d743c63`.
+- Post-merge verification confirmed revision-token storage, `diverged` status, and token-required writes on `main`.
 
-After DEV-018, native Penpot VariantContainer discovery/mapping can continue safely. Do not weaken revision-token enforcement merely to preserve compatibility with older plugin state; older files should become `unverified` and perform a pull/reconciliation to establish a fingerprint.
+Do not automatically convert existing component sets into native VariantContainers until discovery/mapping behavior is proven safe.
 
 ## Development rules
 
