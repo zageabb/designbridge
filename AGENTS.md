@@ -22,23 +22,16 @@ Repository state is authoritative. Do not rely on chat history when Git, code, t
 
 ## Current DesignBridge development state
 
-Merged runtime capability is verified through v0.18.
+Merged runtime capability is verified through v0.19.
 
-Current active item:
+Most recently completed item:
 
 - DEV-019 — native Penpot variant integration.
-- Branch: `feature/v0.19-native-penpot-variants`.
-- Goal: discover/map Penpot-native variant families and use native `switchVariant(...)` when the canonical DesignBridge family maps safely.
-- Keep the existing guarded `swapComponent(...)` path as fallback for ordinary grouped components or mismatched native metadata.
-- Compatibility planning and revision fingerprint protection remain mandatory before any switch.
+- PR #20 passed CI run #233.
+- Merged to `main` as `e54649d0e488cea475415dd04db14c4645228114`.
+- Post-merge verification confirmed native variant mapping, native switch strategy selection, Penpot variant discovery, and `switchVariant(...)` on `main`.
 
-DEV-018 evidence:
-
-- PR #19 passed CI run #218.
-- Merged to `main` as `ba66a3f1ed41dc6fd4db1a0f2fa7f7a04d743c63`.
-- Post-merge verification confirmed revision-token storage, `diverged` status, and token-required writes on `main`.
-
-Do not automatically convert existing component sets into native VariantContainers until discovery/mapping behavior is proven safe.
+No later DEV item is currently active in the ledger. Before starting another implementation milestone, read `DEVELOPMENT.md` for outstanding backlog and select the highest-priority coherent next slice. Revision fingerprint protections from v0.18 remain mandatory for all new sync work.
 
 ## Development rules
 
