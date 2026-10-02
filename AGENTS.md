@@ -80,6 +80,18 @@ Revision number alone is not a valid synchronization identity.
 - Prefer explicit reconciliation states when source and target design documents diverge.
 - Keep developer-facing exports usable as real implementation artefacts rather than presentation-only approximations.
 
+## Native Penpot variant rules
+
+- Native Penpot variant discovery is read-only and must not switch pages or restructure the file.
+- A native family is safe only when its tagged DesignBridge group, component membership, property names, and per-component property values match canonical data.
+- Native property order comes from Penpot `Variants.properties`; do not sort it before creating `switchVariant(position, value)` steps.
+- If native mapping is absent, mismatched, or ambiguous, use the existing guarded `swapComponent` fallback.
+- Do not silently switch from an approved native strategy to fallback after mutation begins; fail and leave canonical state unchanged.
+- After native switching, verify the resulting library component's DesignBridge ID equals the approved target before canonical commit.
+- Reapply only the already-approved remapped overrides.
+- Keep revision fingerprint checks mandatory for planning and commit.
+- Automatic VariantContainer creation/restructuring is not part of DEV-019.
+
 ## Reuse before duplication
 
 Before building a capability from scratch, inspect relevant existing repositories and reuse proven patterns or modules where appropriate, especially:
