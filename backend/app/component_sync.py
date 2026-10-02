@@ -544,3 +544,178 @@ def variant_switch_operation(
         ),
         plan,
     )
+
+
+def native_variant_mapping_report(
+    document: DesignBridgeDocument,
+    native_groups: list[dict[str, Any]],
+) -> dict[str, Any]:
+    canonical = variant_family_report(document)
+    canonical_groups = {
+        item["variant_group"]: item
+        for item in canonical["groups"]
+    }
+
+    native_by_group: dict[str, list[dict[str, Any]]] = {}
+    for raw in native_groups:
+        group_id = str(raw.get("designbridge_variant_group") or "").strip()
+        if not group_id:
+            continue
+        native_by_group.setdefault(group_id, []).append(raw)
+
+    rows: list[dict[str, Any]] = []
+    for group_id, group in sorted(canonical_groups.items()):
+        candidates = native_by_group.get(group_id, [])
+        expected_components = {
+            item["component_id"]: item
+            for item in group["components"]
+        }
+        expected_property_names = sorted({
+            key
+            for item in group["components"]
+            for key in item.get("properties", {})
+        })
+
+        if not candidates:
+            rows.append({
+                "variant_group": group_id,
+                "status": "absent",
+                "native_variant_id": None,
+                "property_names": [],
+                "issues": ["no tagged Penpot native variant family found"],
+            })
+            continue
+
+        if len(candidates) > 1:
+            rows.append({
+                "variant_group": group_id,
+                "status": "ambiguous",
+                "native_variant_id": None,
+                "property_names": [],
+                "issues": ["multiple Penpot native variant families claim this DesignBridge group"],
+            })
+            continue
+
+        native = candidates[0]
+        native_components = {
+            str(item.get("designbridge_component_id") or ""): item
+            for item in native.get("components", [])
+            if item.get("designbridge_component_id")
+        }
+        native_property_names = [str(item) for item in native.get("property_names", [])]
+
+        issues: list[str] = []
+        missing = sorted(set(expected_components) - set(native_components))
+        unknown = sorted(set(native_components) - set(expected_components))
+        if missing:
+            issues.append("missing canonical components: " + ", ".join(missing))
+        if unknown:
+            issues.append("unknown tagged components: " + ", ".join(unknown))
+
+        if sorted(native_property_names) != expected_property_names:
+            issues.append(
+                "property names differ: canonical "
+                + repr(expected_property_names)
+                + " vs Penpot "
+                + repr(sorted(native_property_names))
+            )
+
+        property_mismatches: list[dict[str, Any]] = []
+        for component_id, expected in expected_components.items():
+            native_component = native_components.get(component_id)
+            if native_component is None:
+                continue
+            actual = {
+                str(key): str(value)
+                for key, value in dict(native_component.get("variant_props") or {}).items()
+            }
+            expected_props = {
+                str(key): str(value)
+                for key, value in dict(expected.get("properties") or {}).items()
+            }
+            if actual != expected_props:
+                property_mismatches.append({
+                    "component_id": component_id,
+                    "canonical": expected_props,
+                    "penpot": actual,
+                })
+
+        if property_mismatches:
+            issues.append("one or more component variant property values differ")
+
+        rows.append({
+            "variant_group": group_id,
+            "status": "in_sync" if not issues else "mismatch",
+            "native_variant_id": native.get("native_variant_id"),
+            "library_id": native.get("library_id"),
+            "property_names": native_property_names,
+            "issues": issues,
+            "property_mismatches": property_mismatches,
+            "component_ids": sorted(native_components),
+        })
+
+    return {
+        "summary": {
+            "canonical_groups": len(canonical_groups),
+            "native_mapped": sum(item["status"] == "in_sync" for item in rows),
+            "absent": sum(item["status"] == "absent" for item in rows),
+            "mismatch": sum(item["status"] == "mismatch" for item in rows),
+            "ambiguous": sum(item["status"] == "ambiguous" for item in rows),
+        },
+        "groups": rows,
+    }
+
+
+def plan_variant_switch_with_native(
+    document: DesignBridgeDocument,
+    instance_id: str,
+    target_component_id: str,
+    native_groups: list[dict[str, Any]],
+) -> dict[str, Any]:
+    plan = plan_variant_switch(document, instance_id, target_component_id)
+    report = native_variant_mapping_report(document, native_groups)
+    mapping = next(
+        (
+            item
+            for item in report["groups"]
+            if item["variant_group"] == plan["variant_group"]
+        ),
+        None,
+    )
+
+    strategy: dict[str, Any] = {
+        "kind": "component_swap",
+        "reason": "no verified native Penpot variant mapping",
+    }
+
+    if mapping and mapping["status"] == "in_sync":
+        property_names = mapping["property_names"]
+        source_props = {
+            str(key): str(value)
+            for key, value in plan["source_properties"].items()
+        }
+        target_props = {
+            str(key): str(value)
+            for key, value in plan["target_properties"].items()
+        }
+        steps = [
+            {
+                "position": position,
+                "property": property_name,
+                "value": target_props[property_name],
+            }
+            for position, property_name in enumerate(property_names)
+            if source_props.get(property_name) != target_props.get(property_name)
+        ]
+        strategy = {
+            "kind": "native_variant",
+            "native_variant_id": mapping["native_variant_id"],
+            "library_id": mapping.get("library_id"),
+            "steps": steps,
+        }
+
+    return {
+        **plan,
+        "switch_strategy": strategy,
+        "native_mapping": mapping,
+    }
