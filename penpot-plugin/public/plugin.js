@@ -152,6 +152,13 @@ async function createComponents(document) {
     componentMap.set(componentNode.id, libraryComponent);
     try {
       libraryComponent.setPluginData("designbridge:id", componentNode.id);
+      if (componentNode.variant_group) {
+        libraryComponent.setPluginData("designbridge:variant-group", componentNode.variant_group);
+        libraryComponent.setPluginData(
+          "designbridge:variant-properties",
+          JSON.stringify(componentNode.variant_properties || {})
+        );
+      }
     } catch (_) {}
     y += (componentNode.height || 120) + 80;
   }
@@ -216,6 +223,49 @@ function linkedShapesAcrossDocument() {
 }
 
 
+
+
+function findLibraryComponent(componentId) {
+  const libraries = [
+    penpot.library.local,
+    ...(penpot.library.connected || [])
+  ];
+  for (const library of libraries) {
+    const match = (library.components || []).find(
+      component => component.getPluginData("designbridge:id") === componentId
+    );
+    if (match) return match;
+  }
+  return null;
+}
+
+function switchInstanceVariant(instanceId, targetComponentId, remappedOverrides) {
+  const row = linkedShapesAcrossDocument().find(
+    item => item.shape.getPluginData("designbridge:id") === instanceId
+  );
+  if (!row) throw new Error("DesignBridge instance is not present in Penpot: " + instanceId);
+
+  const shape = row.shape;
+  if (!(typeof shape.isComponentCopyInstance === "function" && shape.isComponentCopyInstance())) {
+    throw new Error("Target shape is not a Penpot component copy instance.");
+  }
+
+  const target = findLibraryComponent(targetComponentId);
+  if (!target) {
+    throw new Error("Target DesignBridge component is not available in Penpot: " + targetComponentId);
+  }
+
+  shape.swapComponent(target);
+  shape.setPluginData("designbridge:id", instanceId);
+  shape.setPluginData("designbridge:type", "instance");
+  shape.setPluginData("designbridge:component-id", targetComponentId);
+  applyInstanceOverrides(shape, { overrides: remappedOverrides || {} });
+
+  return {
+    instance_id: instanceId,
+    target_component_id: targetComponentId
+  };
+}
 
 function componentNodeIndex(document) {
   const result = new Map();
@@ -364,6 +414,30 @@ penpot.ui.onMessage(async (message) => {
     if (penpot.currentFile && Number.isFinite(Number(message.revision))) {
       penpot.currentFile.setPluginData("designbridge:revision", String(Number(message.revision)));
       sendContext();
+    }
+    return;
+  }
+  if (message?.type === "designbridge:switch-instance-variant") {
+    try {
+      const result = switchInstanceVariant(
+        message.instance_id,
+        message.target_component_id,
+        message.remapped_overrides || {}
+      );
+      penpot.ui.sendMessage({
+        type: "designbridge:variant-switch-result",
+        request_id: message.request_id || null,
+        ok: true,
+        result
+      });
+      sendSelection();
+    } catch (error) {
+      penpot.ui.sendMessage({
+        type: "designbridge:variant-switch-result",
+        request_id: message.request_id || null,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error)
+      });
     }
     return;
   }
