@@ -530,6 +530,22 @@ Potential operation bug to keep regression coverage around:
 
 ---
 
+## Autonomous continuation rule
+
+When the user asks to continue development, operate under this rule:
+
+> Continue autonomously until one of these happens:
+> 1. the current objective is complete and verified;
+> 2. a genuinely ambiguous product decision is required;
+> 3. progress is blocked by something outside the repo;
+> 4. continuing would risk destructive changes.
+>
+> Do not stop just because one implementation step has completed.
+
+This means a coding agent should normally continue through implementation, tests, CI inspection, fixes, documentation updates, PR creation, and merge-readiness checks without pausing after each intermediate step. Stop only when one of the conditions above is actually reached.
+
+---
+
 ## CI and branch workflow
 
 Normal workflow:
