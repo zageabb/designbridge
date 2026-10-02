@@ -4,75 +4,161 @@ Last reviewed: 2026-10-02
 Current development state: ACTIVE
 
 ## Purpose
-Common development ledger for the user and AI agents. Existing project-specific planning documents remain valid; this file standardises status and completion evidence.
+
+This file is the repository-level source of truth for planned development and **evidence of completion**. It is intended to be readable by both the user and AI coding agents.
+
+Existing project-specific roadmaps, version documents, release notes, design documents and implementation notes remain valid. They provide detail and history; this file provides the common cross-repository development, coordination and completion standard.
 
 ## Current objective
-Continue reliable design round-tripping and Penpot/Figma-oriented design interchange with revision-aware evidence.
+
+Continue reliable design round-tripping and Penpot/Figma-oriented design interchange with revision-aware evidence, safe synchronisation, reusable design-system behaviour and developer-usable output.
 
 ## Existing planning and evidence sources
+
 - `README.md`
-- `docs/V0.2_COMPONENTS_TOKENS.md through docs/V0.16_COMPONENT_DEFINITIONS.md`
+- `docs/V0.2_COMPONENTS_TOKENS.md`
+- `docs/V0.3_DESIGN_OPERATIONS.md`
+- `docs/V0.4_REVISIONS_ROUNDTRIP.md`
+- `docs/V0.5_PENPOT_SYNC.md`
+- `docs/V0.6_DIRECT_PENPOT_SYNC.md`
+- `docs/V0.7_LAYOUT_SYNC.md`
+- `docs/V0.8_CONFLICT_AWARE_SYNC.md`
+- `docs/V0.9_REVISION_AWARENESS.md`
+- `docs/V0.10_REVISION_DIFF.md`
+- `docs/V0.11_SELECTIVE_PULL.md`
+- `docs/V0.12_THREE_WAY_REVIEW.md`
+- `docs/V0.13_PROPERTY_RESOLUTION.md`
+- `docs/V0.14_DOCUMENT_RECONCILIATION.md`
+- `docs/V0.15_COMPONENT_INSTANCES.md`
+- `docs/V0.16_COMPONENT_DEFINITIONS.md`
+- `GitHub pull requests`
 - `GitHub Actions`
 
 ## Status values
-- 🔵 PLANNED
-- 🔨 IN PROGRESS
-- 🚫 BLOCKED
-- ⏳ AWAITING ACCEPTANCE
-- ✅ COMPLETE
-- 💤 DEFERRED
+
+- 🔵 **PLANNED** — agreed or captured, not started.
+- 🔨 **IN PROGRESS** — implementation has started but completion evidence is incomplete.
+- 🚫 **BLOCKED** — cannot progress until a dependency, conflict or decision is resolved.
+- ⏳ **AWAITING ACCEPTANCE** — development evidence is complete but an external/user/business acceptance step remains.
+- ✅ **COMPLETE** — implementation and all applicable evidence checks have been verified.
+- 💤 **DEFERRED** — intentionally postponed.
 
 ## Evidence standard
-An item is COMPLETE only when applicable repository evidence verifies it: implementation, changed files/non-empty diff, tests or recorded no-test reason, passing tests, CI where available, commit/PR evidence, intended-branch merge, and separately recorded external/user acceptance.
 
-For coding work, an empty result, no write/edit action, unchanged branch HEAD, empty diff or missing requested validation means the task is not complete.
+A development item MUST NOT be marked **COMPLETE** solely because an AI agent, developer, document, UI message or successful CI run says that it is complete.
+
+Before using COMPLETE, verify all applicable evidence:
+
+1. the requested implementation exists in the repository;
+2. the expected files actually changed;
+3. a non-empty diff or equivalent implementation evidence exists;
+4. tests for the behaviour exist, or a reason for no test is recorded;
+5. relevant tests pass;
+6. build, lint, type-check, migration or other repository validation passes where applicable;
+7. CI passes where CI exists;
+8. commit and/or pull-request evidence is recorded;
+9. the change is merged into the intended branch when merge is required;
+10. post-merge verification confirms the expected change exists on the intended branch where appropriate;
+11. user/business/external acceptance is recorded separately from development completion.
+
+If required evidence is missing, use **IN PROGRESS**, **BLOCKED** or **AWAITING ACCEPTANCE** instead.
+
+For coding work, any of the following are explicit evidence that the task is **not complete** when a code change was expected:
+
+- empty final response;
+- no write/edit operation;
+- unchanged branch HEAD;
+- empty branch diff;
+- no requested validation;
+- budget exhaustion before acceptance criteria are satisfied.
+
+Green CI alone does not prove feature completion.
 
 ## Development ledger
 
 ### DEV-000 — Establish evidence-based development ledger
-Status: ✅ COMPLETE
+
+Status: ✅ COMPLETE  
+Priority: High  
+Owner/Agent: ChatGPT  
+Branch: main  
+Depends on: None  
+Can run in parallel with: Repository development work that does not modify this process definition  
+Integration status: integrated
+
+Requirement:
+Give the user and AI agents one persistent place to see planned work, completion state, parallel-development ownership and the evidence supporting completion.
+
+Implementation:
+- Added and standardised this `DEVELOPMENT.md`.
+- Standardised `AGENTS.md` so AI agents must read and maintain this ledger.
+- Added explicit parallel-development coordination metadata.
+- Existing DesignBridge version/design documents remain in place as detailed historical and technical sources.
 
 Evidence:
 - Files: `DEVELOPMENT.md`, `AGENTS.md`
-- Git history records these changes.
-- Tests: not required for this documentation/process-only change.
-- User acceptance: requested 2026-10-02.
+- Commit: recorded by GitHub history for this change.
+- Tests: documentation/process change; no runtime test required.
+- CI: not required to establish the ledger itself.
+- Merged to intended branch: yes, `main`.
+- User acceptance: requested directly on 2026-10-02.
 
-## New item template
+Completion criteria:
+- [x] Common status vocabulary defined.
+- [x] Completion evidence rules defined.
+- [x] False-completion rules defined.
+- [x] Existing planning/evidence sources referenced.
+- [x] Parallel-development metadata defined.
+- [x] Integration status defined.
+- [x] AI maintenance rule added.
+- [x] Development completion separated from external/user acceptance.
+
+## New development item template
+
+Copy this section for every meaningful feature, bug fix, development idea or integration task.
 
 ### DEV-XXX — Short title
-Status: 🔵 PLANNED
-Priority: Medium
-Owner/Agent:
-Branch:
-Depends on:
-Can run in parallel with:
-Integration status:
+
+Status: 🔵 PLANNED  
+Priority: Medium  
+Owner/Agent:  
+Branch:  
+Depends on:  
+Can run in parallel with:  
+Integration status: not started
 
 Requirement:
+Describe what the user actually asked for and the intended outcome.
 
 Implementation:
+Record what was changed. Leave blank until implementation starts.
 
 Evidence:
 - Commit:
 - PR:
 - Files:
 - Tests:
+- Build/lint/type-check/validation:
 - CI:
 - Merged to intended branch:
-- User/business acceptance:
+- Post-merge verification:
+- User/business/external acceptance:
 
 Completion criteria:
 - [ ] Implementation exists.
 - [ ] Relevant files changed.
+- [ ] Meaningful diff or equivalent implementation evidence exists.
 - [ ] Tests added/updated, or reason recorded.
 - [ ] Relevant tests pass.
+- [ ] Build/lint/type-check/other validation passes where applicable.
 - [ ] CI passes where applicable.
 - [ ] Commit/PR evidence recorded.
 - [ ] Merged where required.
+- [ ] Post-merge verification completed where applicable.
 - [ ] External/user acceptance separated from development completion.
 
 Notes:
+Record limitations, decisions, discovered follow-up work and integration considerations.
 
 ## Parallel development coordination
 
@@ -82,11 +168,77 @@ Use the coordination fields on every active DEV item when parallel work is possi
 - **Branch** — the working branch or worktree used for the item.
 - **Depends on** — DEV items, decisions or external prerequisites that must complete first.
 - **Can run in parallel with** — DEV items that are safe to develop concurrently without conflicting ownership or sequencing.
-- **Integration status** — for example: not started, isolated, ready for integration, integrated, or integration blocked.
+- **Integration status** — use values such as `not started`, `isolated`, `ready for integration`, `integration blocked`, `integrated`, or `verified on target branch`.
 
-Before starting parallel work, agents should check these fields and avoid claiming the same item, branch or overlapping integration responsibility. If two items touch the same subsystem or files, record the conflict explicitly and sequence or coordinate integration rather than assuming they are independent.
+Before starting parallel work:
 
-Parallel execution does not weaken the completion standard: each DEV item still requires its own implementation, tests/validation, CI evidence where applicable, and integration/merge evidence before it can be marked COMPLETE.
+1. identify genuinely independent workstreams;
+2. give each workstream a concrete DEV item and acceptance criteria;
+3. record branch/worktree ownership;
+4. record file/module/subsystem ownership where practical;
+5. identify dependencies before spawning parallel work;
+6. avoid assigning two active agents the same responsibility unless explicitly coordinated;
+7. do not describe a sequential dependency chain as parallel work;
+8. record who owns final integration;
+9. independently verify each child workstream before integration;
+10. verify the integrated result on the intended target branch.
+
+If two DEV items touch the same subsystem or files, record the conflict explicitly and sequence or coordinate integration rather than assuming independence.
+
+Parallel execution does not weaken the completion standard: every DEV item retains its own implementation, validation, CI, Git and acceptance evidence requirements.
+
+## CI, acceptance and merge gates
+
+Treat these as separate gates:
+
+```text
+Implementation evidence
+        ↓
+Local validation
+        ↓
+CI
+        ↓
+Acceptance verification
+        ↓
+Pre-merge review
+        ↓
+Merge
+        ↓
+Post-merge verification
+        ↓
+Development state update
+```
+
+Pre-merge review should check, where applicable:
+
+- complete diff against the original requirement;
+- no unintended debug or temporary files;
+- no committed secrets;
+- relevant tests/build/lint/type-check;
+- migration/deployment implications;
+- documentation accuracy;
+- acceptance criteria.
+
+Post-merge verification should confirm the expected change exists on the intended branch and record the resulting commit/merge evidence.
+
+## Recovery and no-progress handling
+
+If a development attempt makes no meaningful progress, do not convert activity into a COMPLETE status.
+
+After repeated unsuccessful fixes to the same underlying problem, stop symptom-patching and inspect root cause, relevant history, current diff, tests and runtime evidence before another code change.
+
+If budget/tool/runtime limits interrupt work, record:
+
+- work completed;
+- work remaining;
+- blocker or reason for stopping;
+- safest continuation point;
+- recommended next action.
+
+Preserve enough state in this file that another agent can continue without reconstructing the task from chat history.
 
 ## Maintenance rule
-Update this file during the same development pass that changes implementation. Repository evidence wins when prose disagrees.
+
+Update this file during the same development pass that changes implementation.
+
+When documentation and repository evidence disagree, repository evidence wins. Reconcile this file rather than preserving an unsupported COMPLETE state.
