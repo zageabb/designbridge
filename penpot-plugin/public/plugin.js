@@ -226,12 +226,15 @@ function linkedShapesAcrossDocument() {
 
 
 
-function findLibraryComponent(componentId) {
-  const libraries = [
+function designBridgeLibraries() {
+  return [
     penpot.library.local,
     ...(penpot.library.connected || [])
   ];
-  for (const library of libraries) {
+}
+
+function findLibraryComponent(componentId) {
+  for (const library of designBridgeLibraries()) {
     const match = (library.components || []).find(
       component => component.getPluginData("designbridge:id") === componentId
     );
@@ -240,7 +243,65 @@ function findLibraryComponent(componentId) {
   return null;
 }
 
-function switchInstanceVariant(instanceId, targetComponentId, remappedOverrides) {
+function discoverNativeVariantFamilies() {
+  const groups = new Map();
+
+  for (const library of designBridgeLibraries()) {
+    for (const component of library.components || []) {
+      try {
+        if (!(typeof component.isVariant === "function" && component.isVariant())) continue;
+        const variants = component.variants;
+        if (!variants) continue;
+
+        const key = library.id + ":" + variants.id;
+        if (groups.has(key)) continue;
+
+        const members = variants.variantComponents() || [];
+        const components = members.map(member => {
+          const isVariant =
+            typeof member.isVariant === "function" && member.isVariant();
+          return {
+            penpot_component_id: member.id,
+            designbridge_component_id:
+              member.getPluginData("designbridge:id") || null,
+            designbridge_variant_group:
+              member.getPluginData("designbridge:variant-group") || null,
+            name: member.name,
+            variant_props: isVariant ? { ...(member.variantProps || {}) } : {}
+          };
+        });
+
+        const groupTags = [
+          ...new Set(
+            components
+              .map(item => item.designbridge_variant_group)
+              .filter(Boolean)
+          )
+        ];
+
+        groups.set(key, {
+          native_variant_id: variants.id,
+          library_id: variants.libraryId || library.id,
+          property_names: [...(variants.properties || [])],
+          designbridge_variant_group:
+            groupTags.length === 1 ? groupTags[0] : null,
+          components
+        });
+      } catch (error) {
+        console.warn("DesignBridge native variant discovery failed", error);
+      }
+    }
+  }
+
+  return [...groups.values()];
+}
+
+async function switchInstanceVariant(
+  instanceId,
+  targetComponentId,
+  remappedOverrides,
+  switchStrategy
+) {
   const row = linkedShapesAcrossDocument().find(
     item => item.shape.getPluginData("designbridge:id") === instanceId
   );
@@ -251,12 +312,46 @@ function switchInstanceVariant(instanceId, targetComponentId, remappedOverrides)
     throw new Error("Target shape is not a Penpot component copy instance.");
   }
 
-  const target = findLibraryComponent(targetComponentId);
-  if (!target) {
-    throw new Error("Target DesignBridge component is not available in Penpot: " + targetComponentId);
+  const strategy = switchStrategy || { kind: "component_swap" };
+  let appliedStrategy = "component_swap";
+
+  if (strategy.kind === "native_variant") {
+    const current = typeof shape.component === "function" ? shape.component() : null;
+    if (!(current && typeof current.isVariant === "function" && current.isVariant())) {
+      throw new Error("Current Penpot component is not a native variant component.");
+    }
+    const variants = current.variants;
+    if (!variants || variants.id !== strategy.native_variant_id) {
+      throw new Error("Penpot native variant family no longer matches the approved switch plan.");
+    }
+
+    for (const step of strategy.steps || []) {
+      shape.switchVariant(Number(step.position), String(step.value));
+      if (typeof penpot.waitForLayoutUpdate === "function") {
+        await penpot.waitForLayoutUpdate();
+      }
+    }
+
+    const resulting = typeof shape.component === "function" ? shape.component() : null;
+    const resultingDesignBridgeId =
+      resulting?.getPluginData("designbridge:id") || null;
+    if (resultingDesignBridgeId !== targetComponentId) {
+      throw new Error(
+        "Native variant switch reached " +
+        (resultingDesignBridgeId || "an unlinked component") +
+        " instead of " +
+        targetComponentId
+      );
+    }
+    appliedStrategy = "native_variant";
+  } else {
+    const target = findLibraryComponent(targetComponentId);
+    if (!target) {
+      throw new Error("Target DesignBridge component is not available in Penpot: " + targetComponentId);
+    }
+    shape.swapComponent(target);
   }
 
-  shape.swapComponent(target);
   shape.setPluginData("designbridge:id", instanceId);
   shape.setPluginData("designbridge:type", "instance");
   shape.setPluginData("designbridge:component-id", targetComponentId);
@@ -264,7 +359,8 @@ function switchInstanceVariant(instanceId, targetComponentId, remappedOverrides)
 
   return {
     instance_id: instanceId,
-    target_component_id: targetComponentId
+    target_component_id: targetComponentId,
+    strategy: appliedStrategy
   };
 }
 
@@ -411,6 +507,13 @@ penpot.ui.onMessage(async (message) => {
     sendContext();
     return;
   }
+  if (message?.type === "designbridge:get-native-variants") {
+    penpot.ui.sendMessage({
+      type: "designbridge:native-variants",
+      variants: discoverNativeVariantFamilies()
+    });
+    return;
+  }
   if (message?.type === "designbridge:set-revision") {
     if (penpot.currentFile && Number.isFinite(Number(message.revision))) {
       penpot.currentFile.setPluginData("designbridge:revision", String(Number(message.revision)));
@@ -424,10 +527,11 @@ penpot.ui.onMessage(async (message) => {
   }
   if (message?.type === "designbridge:switch-instance-variant") {
     try {
-      const result = switchInstanceVariant(
+      const result = await switchInstanceVariant(
         message.instance_id,
         message.target_component_id,
-        message.remapped_overrides || {}
+        message.remapped_overrides || {},
+        message.switch_strategy || null
       );
       penpot.ui.sendMessage({
         type: "designbridge:variant-switch-result",
