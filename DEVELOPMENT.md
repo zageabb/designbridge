@@ -31,6 +31,7 @@ Continue reliable design round-tripping and Penpot/Figma-oriented design interch
 - `docs/V0.14_DOCUMENT_RECONCILIATION.md`
 - `docs/V0.15_COMPONENT_INSTANCES.md`
 - `docs/V0.16_COMPONENT_DEFINITIONS.md`
+- `docs/V0.17_COMPONENT_VARIANTS.md`
 - `GitHub pull requests`
 - `GitHub Actions`
 
@@ -113,6 +114,59 @@ Completion criteria:
 - [x] AI maintenance rule added.
 - [x] Development completion separated from external/user acceptance.
 
+### DEV-017 — Component variants and safe switching
+
+Status: 🔨 IN PROGRESS  
+Priority: High  
+Owner/Agent: ChatGPT  
+Branch: `feature/v0.17-component-variants-rebased`  
+Depends on: v0.16 component definition synchronization  
+Can run in parallel with: documentation/process work that does not modify component/variant sync code  
+Integration status: ready for CI / not yet merged
+
+Requirement:
+Represent component variant families canonically and allow safe Penpot instance switching without silently losing compatible instance overrides.
+
+Implementation:
+- Added canonical `variant_group`, `variant_properties`, and stable child `variant_slot`.
+- Rejects duplicate variant property combinations inside one family.
+- Added variant family reporting.
+- Added compatibility planning before mutation.
+- Remaps overrides across variants by `variant_slot`, never by display name.
+- Rejects missing slots, incompatible types, and direct-fill remaps onto token-bound targets.
+- Added Penpot **Review variants** UI.
+- Uses Penpot native component swap semantics for compatible switches.
+- Commits the canonical component switch only after Penpot succeeds.
+- Attempts to swap Penpot back to the source component if the final canonical commit loses a revision race.
+- Rebased the implementation onto current `main` after process/documentation work landed there.
+
+Evidence:
+- Original implementation CI: GitHub Actions run #174 passed on commit `af97201f078f81002f8743361b9b292ebb79be59`.
+- Original PR: #17.
+- Rebased branch: `feature/v0.17-component-variants-rebased`.
+- Files: `backend/app/models.py`, `backend/app/component_sync.py`, `backend/app/main.py`, `penpot-plugin/public/plugin.js`, `penpot-plugin/public/index.html`.
+- Tests: `backend/tests/test_component_sync.py`, `backend/tests/test_designbridge.py`.
+- Documentation: `docs/V0.17_COMPONENT_VARIANTS.md`.
+- CI for rebased branch: pending.
+- Merged to intended branch: no.
+- Post-merge verification: pending.
+- User/business/external acceptance: separate from development completion.
+
+Completion criteria:
+- [x] Canonical variant families exist.
+- [x] Stable cross-variant child mapping exists.
+- [x] Compatible override remapping is implemented.
+- [x] Incompatible switches are blocked before mutation.
+- [x] Penpot switch precedes canonical commit.
+- [x] Rollback is attempted on final revision race.
+- [x] Material behavior is covered by tests.
+- [ ] Rebased branch CI passes.
+- [ ] PR is merged to `main`.
+- [ ] Post-merge verification is recorded.
+
+Notes:
+Native Penpot VariantContainer discovery and `switchVariant(...)` integration remain follow-up work. The current implementation uses safe component swaps for canonical variant families.
+
 ## New development item template
 
 Copy this section for every meaningful feature, bug fix, development idea or integration task.
@@ -186,6 +240,20 @@ Before starting parallel work:
 If two DEV items touch the same subsystem or files, record the conflict explicitly and sequence or coordinate integration rather than assuming independence.
 
 Parallel execution does not weaken the completion standard: every DEV item retains its own implementation, validation, CI, Git and acceptance evidence requirements.
+
+## Autonomous continuation rule
+
+When the user asks to continue development, operate under this rule:
+
+> Continue autonomously until one of these happens:
+> 1. the current objective is complete and verified;
+> 2. a genuinely ambiguous product decision is required;
+> 3. progress is blocked by something outside the repo;
+> 4. continuing would risk destructive changes.
+>
+> Do not stop just because one implementation step has completed.
+
+A coding agent should normally continue through implementation, tests, CI inspection, fixes, documentation updates, PR creation, merge-readiness, merge, and post-merge verification without pausing after each intermediate step.
 
 ## CI, acceptance and merge gates
 
