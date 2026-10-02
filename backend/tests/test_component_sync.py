@@ -213,3 +213,107 @@ def test_component_definition_operations_reject_missing_main():
             [],
             ["card"],
         )
+
+
+def _variant_document():
+    from app.models import DesignNode
+
+    document = DesignBridgeDocument.model_validate(VALID).model_copy(deep=True)
+    base_component = document.components[0]
+    base_component.variant_group = "card-state"
+    base_component.variant_properties = {"state": "default"}
+    base_component.children[0].variant_slot = "label"
+
+    active = DesignNode.model_validate(
+        {
+            "id": "card-active",
+            "type": "component",
+            "name": "Card Active",
+            "variant_group": "card-state",
+            "variant_properties": {"state": "active"},
+            "children": [
+                {
+                    "id": "card-active-label",
+                    "type": "text",
+                    "name": "Label",
+                    "text": "Active",
+                    "variant_slot": "label",
+                }
+            ],
+        }
+    )
+    document.components.append(active)
+    return document
+
+
+def test_variant_family_report_lists_groups_and_instances():
+    from app.component_sync import variant_family_report
+
+    document = _variant_document()
+    report = variant_family_report(document)
+
+    assert report["summary"]["variant_groups"] == 1
+    assert report["summary"]["variant_components"] == 2
+    assert report["summary"]["variant_instances"] == 1
+    assert report["groups"][0]["variant_group"] == "card-state"
+
+
+def test_variant_switch_plan_remaps_safe_override_by_variant_slot():
+    from app.component_sync import plan_variant_switch
+
+    document = _variant_document()
+    instance = document.pages[0].children[0].children[1]
+    instance.overrides = {"card-label": {"text": "Custom label"}}
+
+    plan = plan_variant_switch(
+        document,
+        "card-instance",
+        "card-active",
+    )
+
+    assert plan["compatible"] is True
+    assert plan["remapped_overrides"] == {
+        "card-active-label": {"text": "Custom label"}
+    }
+
+
+def test_variant_switch_plan_rejects_missing_target_slot():
+    from app.component_sync import plan_variant_switch
+
+    document = _variant_document()
+    document.pages[0].children[0].children[1].overrides = {
+        "card-label": {"text": "Custom label"}
+    }
+    document.components[1].children[0].variant_slot = "different-slot"
+
+    plan = plan_variant_switch(
+        document,
+        "card-instance",
+        "card-active",
+    )
+
+    assert plan["compatible"] is False
+    assert "missing the override slot" in plan["issues"][0]["reason"]
+
+
+def test_variant_switch_operation_updates_component_and_override_ids():
+    from app.component_sync import variant_switch_operation
+
+    document = _variant_document()
+    document.pages[0].children[0].children[1].overrides = {
+        "card-label": {"text": "Custom label"}
+    }
+
+    operation, plan = variant_switch_operation(
+        document,
+        "card-instance",
+        "card-active",
+    )
+
+    assert plan["compatible"] is True
+    assert operation.node_id == "card-instance"
+    assert operation.changes["component_id"] == "card-active"
+    assert operation.changes["variant_group"] == "card-state"
+    assert operation.changes["overrides"] == {
+        "card-active-label": {"text": "Custom label"}
+    }
