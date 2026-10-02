@@ -317,3 +317,116 @@ def test_variant_switch_operation_updates_component_and_override_ids():
     assert operation.changes["overrides"] == {
         "card-active-label": {"text": "Custom label"}
     }
+
+
+def _native_variant_group():
+    return {
+        "native_variant_id": "penpot-card-state",
+        "library_id": "local-library",
+        "property_names": ["state"],
+        "designbridge_variant_group": "card-state",
+        "components": [
+            {
+                "penpot_component_id": "penpot-card",
+                "designbridge_component_id": "card",
+                "designbridge_variant_group": "card-state",
+                "name": "Card",
+                "variant_props": {"state": "default"},
+            },
+            {
+                "penpot_component_id": "penpot-card-active",
+                "designbridge_component_id": "card-active",
+                "designbridge_variant_group": "card-state",
+                "name": "Card Active",
+                "variant_props": {"state": "active"},
+            },
+        ],
+    }
+
+
+def test_native_variant_mapping_report_recognizes_exact_family():
+    from app.component_sync import native_variant_mapping_report
+
+    document = _variant_document()
+    report = native_variant_mapping_report(
+        document,
+        [_native_variant_group()],
+    )
+
+    assert report["summary"]["native_mapped"] == 1
+    assert report["groups"][0]["status"] == "in_sync"
+    assert report["groups"][0]["native_variant_id"] == "penpot-card-state"
+    assert report["groups"][0]["property_names"] == ["state"]
+
+
+def test_native_variant_mapping_report_rejects_property_mismatch():
+    from app.component_sync import native_variant_mapping_report
+
+    document = _variant_document()
+    native = _native_variant_group()
+    native["components"][1]["variant_props"] = {"state": "hover"}
+
+    report = native_variant_mapping_report(document, [native])
+
+    assert report["summary"]["mismatch"] == 1
+    assert report["groups"][0]["status"] == "mismatch"
+    assert report["groups"][0]["property_mismatches"][0]["component_id"] == "card-active"
+
+
+def test_native_variant_switch_plan_uses_ordered_property_steps():
+    from app.component_sync import plan_variant_switch_with_native
+
+    document = _variant_document()
+    plan = plan_variant_switch_with_native(
+        document,
+        "card-instance",
+        "card-active",
+        [_native_variant_group()],
+    )
+
+    assert plan["compatible"] is True
+    assert plan["switch_strategy"] == {
+        "kind": "native_variant",
+        "native_variant_id": "penpot-card-state",
+        "library_id": "local-library",
+        "steps": [
+            {
+                "position": 0,
+                "property": "state",
+                "value": "active",
+            }
+        ],
+    }
+
+
+def test_native_variant_switch_plan_falls_back_on_mismatch():
+    from app.component_sync import plan_variant_switch_with_native
+
+    document = _variant_document()
+    native = _native_variant_group()
+    native["property_names"] = ["mode"]
+
+    plan = plan_variant_switch_with_native(
+        document,
+        "card-instance",
+        "card-active",
+        [native],
+    )
+
+    assert plan["compatible"] is True
+    assert plan["switch_strategy"]["kind"] == "component_swap"
+    assert plan["native_mapping"]["status"] == "mismatch"
+
+
+def test_native_variant_mapping_is_ambiguous_when_multiple_groups_claim_family():
+    from app.component_sync import native_variant_mapping_report
+
+    document = _variant_document()
+    first = _native_variant_group()
+    second = _native_variant_group()
+    second["native_variant_id"] = "penpot-card-state-2"
+
+    report = native_variant_mapping_report(document, [first, second])
+
+    assert report["summary"]["ambiguous"] == 1
+    assert report["groups"][0]["status"] == "ambiguous"
