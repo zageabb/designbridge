@@ -29,7 +29,7 @@ Current active item:
 - DEV-017 — component variants and safe switching.
 - Branch: `feature/v0.17-component-variants-rebased`.
 - Original PR #17 became non-mergeable after newer process/documentation commits landed on `main`.
-- The runtime implementation has been rebased onto current `main`; use the rebased branch and its replacement PR as the active integration path.
+- The runtime implementation has been rebased onto current `main`; active integration is PR #18 from the rebased branch.
 - Original v0.17 code CI passed in GitHub Actions run #174.
 - Rebased-branch CI and merge/post-merge verification remain required before DEV-017 can become COMPLETE.
 
