@@ -171,13 +171,13 @@ Native Penpot VariantContainer discovery and `switchVariant(...)` integration re
 
 ### DEV-018 — Durable revision fingerprints
 
-Status: 🔨 IN PROGRESS  
+Status: ✅ COMPLETE  
 Priority: Critical  
 Owner/Agent: ChatGPT  
 Branch: `feature/v0.18-revision-fingerprint`  
 Depends on: DEV-017 integrated  
 Can run in parallel with: non-sync documentation work only  
-Integration status: implementation and regression tests in progress
+Integration status: verified on target branch
 
 Requirement:
 Prevent reused numeric revision numbers from being mistaken for synchronized state after undo followed by a new divergent save.
@@ -200,10 +200,11 @@ Evidence:
 - Files: `backend/app/storage.py`, `backend/app/main.py`, `penpot-plugin/public/plugin.js`, `penpot-plugin/public/index.html`.
 - Tests: `backend/tests/test_revision_fingerprint.py`, updates to `backend/tests/test_designbridge.py`.
 - Branch commits include `59f9da5549ee3fa893345315f173487036bf0d88`, `c555885f046deff8ee28c058e8be9e7ac8db0f2f`, `511082958e3aa8e93f66bdb0cc2f49db72bd8b92`, `e830a940e884db24bf779a57a9cfedb9a8ab0514`, `46ac4bdcecbef300b7dbe5f5983b1866c195bb83`.
-- CI: pending.
-- PR: pending.
-- Merged to intended branch: no.
-- Post-merge verification: pending.
+- CI: GitHub Actions run #218 passed tests and compile.
+- PR: #19.
+- Merged to intended branch: yes, `main`.
+- Merge commit: `ba66a3f1ed41dc6fd4db1a0f2fa7f7a04d743c63`.
+- Post-merge verification: token storage, `diverged` status, and token-required writes confirmed on `main`.
 
 Completion criteria:
 - [x] Revision token is deterministic.
@@ -215,12 +216,53 @@ Completion criteria:
 - [x] Penpot writes require matching revision identity.
 - [x] Base-sensitive review/pull calls validate base token.
 - [x] Regression tests cover revision-number reuse.
+- [x] CI passes.
+- [x] PR is merged to `main`.
+- [x] Post-merge verification is recorded.
+
+Notes:
+This milestone intentionally hardens identity before additional structural/destructive synchronization work.
+
+### DEV-019 — Native Penpot variant integration
+
+Status: 🔨 IN PROGRESS  
+Priority: High  
+Owner/Agent: ChatGPT  
+Branch: `feature/v0.19-native-penpot-variants`  
+Depends on: DEV-018 complete  
+Can run in parallel with: unrelated documentation or non-component adapter work  
+Integration status: implementation in progress
+
+Requirement:
+Discover Penpot-native variant families, map them to canonical DesignBridge variant groups/properties, and use Penpot's native variant switching when the mapping is safe, while retaining the existing component-swap fallback.
+
+Implementation:
+- Pending implementation in this branch.
+- Official Penpot plugin API confirms native variant components expose `variantProps` and shared `Variants.properties`.
+- Official Penpot plugin API confirms component copies support `switchVariant(position, value)`.
+- Native switching will only be selected when canonical and Penpot families map deterministically; otherwise the current safe `swapComponent` fallback remains active.
+
+Evidence:
+- Branch: `feature/v0.19-native-penpot-variants`.
+- CI: pending.
+- PR: pending.
+- Merged to intended branch: no.
+- Post-merge verification: pending.
+
+Completion criteria:
+- [ ] Penpot native variant families are discoverable without changing the active page.
+- [ ] Canonical variant groups/properties can be compared with native Penpot variant metadata.
+- [ ] Native-compatible instances use `switchVariant(...)`.
+- [ ] Non-native or mismatched families retain the existing component-swap fallback.
+- [ ] Override compatibility planning remains enforced before either switch mechanism.
+- [ ] Revision fingerprint protections remain enforced.
+- [ ] Tests cover native mapping, native selection, and fallback behavior.
 - [ ] CI passes.
 - [ ] PR is merged to `main`.
 - [ ] Post-merge verification is recorded.
 
 Notes:
-This milestone intentionally hardens identity before additional structural/destructive synchronization work.
+Do not automatically restructure arbitrary Penpot files into VariantContainers in this milestone. Discovery/mapping/safe use comes first.
 
 ## New development item template
 
