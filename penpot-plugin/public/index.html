@@ -61,7 +61,7 @@
 const input=document.getElementById("json"), status=document.getElementById("status"), selectionStatus=document.getElementById("selectionStatus");
 const apiUrl=document.getElementById("apiUrl"),syncStatus=document.getElementById("syncStatus"),projectIdEl=document.getElementById("projectId"),revisionState=document.getElementById("revisionState");
 const updateBadge=document.getElementById("updateBadge"),latestSummary=document.getElementById("latestSummary"),diffSummary=document.getElementById("diffSummary"),selectivePull=document.getElementById("selectivePull"),conflictSummary=document.getElementById("conflictSummary"),documentSummary=document.getElementById("documentSummary"),componentSummary=document.getElementById("componentSummary"),definitionSummary=document.getElementById("definitionSummary"),variantSummary=document.getElementById("variantSummary");
-let lastSelection=[],projectId=null,localRevision=null,currentRevision=null,statusTimer=null,lastDiff=null,linkedSnapshotResolver=null,documentSnapshotResolver=null,lastLinkedSnapshots=[],lastVariantReport=null,variantSwitchResolver=null;
+let lastSelection=[],projectId=null,localRevision=null,localRevisionToken=null,currentRevision=null,currentRevisionToken=null,statusTimer=null,lastDiff=null,linkedSnapshotResolver=null,documentSnapshotResolver=null,lastLinkedSnapshots=[],lastVariantReport=null,variantSwitchResolver=null;
 try{
   const remembered=localStorage.getItem("designbridge:api-url");
   if(remembered)apiUrl.value=remembered;
@@ -78,23 +78,40 @@ async function api(path,options={}){
   return data;
 }
 
-function setRevision(revision){
+function setRevision(revision,revisionToken){
   localRevision=Number(revision);
-  parent.postMessage({type:"designbridge:set-revision",revision:localRevision},"*");
+  localRevisionToken=revisionToken||null;
+  parent.postMessage({
+    type:"designbridge:set-revision",
+    revision:localRevision,
+    revision_token:localRevisionToken
+  },"*");
 }
 async function refreshStatus(){
   if(!projectId)return;
   try{
-    const query=localRevision==null?"":"?local_revision="+encodeURIComponent(localRevision);
+    const params=[];
+    if(localRevision!=null)params.push("local_revision="+encodeURIComponent(localRevision));
+    if(localRevisionToken)params.push("local_revision_token="+encodeURIComponent(localRevisionToken));
+    const query=params.length?"?"+params.join("&"):"";
     const data=await api("/api/penpot/projects/"+encodeURIComponent(projectId)+"/status"+query);
     currentRevision=data.current_revision;
+    currentRevisionToken=data.current_revision_token||null;
     revisionState.textContent=data.state+" · local "+(data.local_revision??"?")+" / DesignBridge "+data.current_revision;
-    updateBadge.style.display=data.state==="behind"?"inline":"none";
+    updateBadge.style.display=["behind","diverged","unverified"].includes(data.state)?"inline":"none";
     if(data.state==="behind"){
       syncStatus.textContent="DesignBridge has a newer revision. Review or pull latest before pushing Penpot edits.";
       latestSummary.style.display="block";
       latestSummary.textContent="Latest: revision "+data.current_revision+(data.description?" · "+data.description:"");
       reviewDiff().catch(()=>{});
+    }else if(data.state==="diverged"){
+      syncStatus.textContent="Revision number matches, but the content fingerprint differs. Pull/reconcile before any write.";
+      latestSummary.style.display="block";
+      latestSummary.textContent="DesignBridge revision "+data.current_revision+" has a different content fingerprint.";
+    }else if(data.state==="unverified"){
+      syncStatus.textContent="This Penpot file has no revision fingerprint yet. Pull latest once to establish a verified sync identity.";
+      latestSummary.style.display="block";
+      latestSummary.textContent="Fingerprint verification is required before writing.";
     }else if(data.state==="in_sync"){
       syncStatus.textContent="Penpot and DesignBridge are in sync at revision "+data.current_revision+".";
       latestSummary.style.display="none";
@@ -228,8 +245,11 @@ async function switchVariant(instanceId){
       const reasons=(plan.issues||[]).map(item=>item.reason).join("; ");
       throw new Error("Variant switch is incompatible: "+reasons);
     }
-    if(Number(planned.revision)!==Number(localRevision)){
-      throw new Error("DesignBridge changed since this Penpot revision. Reconcile before switching variants.");
+    if(
+      Number(planned.revision)!==Number(localRevision) ||
+      planned.revision_token!==localRevisionToken
+    ){
+      throw new Error("DesignBridge revision identity changed. Reconcile before switching variants.");
     }
 
     await requestVariantSwap(instanceId,targetComponentId,plan.remapped_overrides||{});
@@ -239,13 +259,14 @@ async function switchVariant(instanceId){
         "/api/penpot/projects/"+encodeURIComponent(projectId)+"/commit-variant-switch",
         {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
           expected_revision:localRevision,
+          expected_revision_token:localRevisionToken,
           instance_id:instanceId,
           target_component_id:targetComponentId,
           description:"Switch component instance variant"
         })}
       );
       input.value=JSON.stringify(committed.document,null,2);
-      setRevision(committed.revision);
+      setRevision(committed.revision,committed.revision_token);
       currentRevision=committed.revision;
       syncStatus.textContent="Switched "+instanceId+" to "+targetComponentId+" in revision "+committed.revision+".";
       await refreshStatus();
@@ -310,6 +331,7 @@ async function captureComponentDefinitions(componentIds){
       "/api/penpot/projects/"+encodeURIComponent(projectId)+"/capture-component-definitions",
       {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
         expected_revision:localRevision,
+          expected_revision_token:localRevisionToken,
         snapshots:lastLinkedSnapshots,
         component_ids:componentIds,
         description:"Capture Penpot component definition changes"
@@ -317,7 +339,7 @@ async function captureComponentDefinitions(componentIds){
     );
     input.value=JSON.stringify(data.document,null,2);
     if(data.changed){
-      setRevision(data.revision);
+      setRevision(data.revision,data.revision_token);
       currentRevision=data.revision;
       syncStatus.textContent="Captured component definitions in revision "+data.revision+".";
     }else{
@@ -340,8 +362,8 @@ async function applyCanonicalDefinitions(componentIds){
       component_ids:componentIds
     },"*");
     currentRevision=latest.revision;
-    if(localRevision===latest.revision){
-      setRevision(latest.revision);
+    if(localRevision===latest.revision&&localRevisionToken===latest.revision_token){
+      setRevision(latest.revision,latest.revision_token);
       syncStatus.textContent="Applied canonical component definitions at revision "+latest.revision+". Existing Penpot instance overrides remain protected by Penpot.";
     }else{
       syncStatus.textContent="Applied component definitions from revision "+latest.revision+", but other changes remain outstanding. Penpot stays based on revision "+localRevision+".";
@@ -391,6 +413,7 @@ async function captureSafeOverrides(instanceIds){
       "/api/penpot/projects/"+encodeURIComponent(projectId)+"/capture-instance-overrides",
       {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
         expected_revision:localRevision,
+          expected_revision_token:localRevisionToken,
         snapshots:lastLinkedSnapshots,
         instance_ids:instanceIds,
         description:"Capture Penpot component instance overrides"
@@ -398,7 +421,7 @@ async function captureSafeOverrides(instanceIds){
     );
     input.value=JSON.stringify(data.document,null,2);
     if(data.changed){
-      setRevision(data.revision);
+      setRevision(data.revision,data.revision_token);
       currentRevision=data.revision;
       syncStatus.textContent="Captured safe instance overrides in revision "+data.revision+".";
     }else{
@@ -445,7 +468,8 @@ async function reviewWholeDocument(){
     lastLinkedSnapshots=snapshot.snapshots||[];
     const data=await api(
       "/api/penpot/projects/"+encodeURIComponent(projectId)+"/document-reconciliation",
-      {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({from_revision:localRevision,snapshots:lastLinkedSnapshots})}
+      {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({from_revision:localRevision,
+        from_revision_token:localRevisionToken,snapshots:lastLinkedSnapshots})}
     );
     renderDocumentReconciliation(data);
     const s=data.reconciliation?.summary||{};
@@ -493,7 +517,8 @@ async function checkLocalConflicts(){
     lastLinkedSnapshots=snapshots;
     const data=await api(
       "/api/penpot/projects/"+encodeURIComponent(projectId)+"/three-way-review",
-      {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({from_revision:localRevision,snapshots})}
+      {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({from_revision:localRevision,
+        from_revision_token:localRevisionToken,snapshots})}
     );
     renderThreeWay(data);
     const conflicts=data.review?.summary?.conflict_properties||0;
@@ -522,6 +547,7 @@ async function applyPropertyResolutions(){
       "/api/penpot/projects/"+encodeURIComponent(projectId)+"/resolve-properties",
       {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
         from_revision:localRevision,
+        from_revision_token:localRevisionToken,
         snapshots:lastLinkedSnapshots,
         resolutions,
         description:"Resolve Penpot property conflicts"
@@ -532,7 +558,7 @@ async function applyPropertyResolutions(){
       parent.postMessage({type:"designbridge:apply-property-updates",updates:data.remote_updates},"*");
     }
     input.value=JSON.stringify(data.document,null,2);
-    setRevision(data.final_revision);
+    setRevision(data.final_revision,data.final_revision_token);
     currentRevision=data.final_revision;
     syncStatus.textContent="Property resolutions applied. Penpot is synchronized at revision "+data.final_revision+".";
     conflictSummary.style.display="none";
@@ -549,13 +575,14 @@ async function pullSelectedChanges(){
     if(!nodeIds.length)throw new Error("Select at least one changed node.");
     const data=await api(
       "/api/penpot/projects/"+encodeURIComponent(projectId)+"/selective-pull",
-      {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({from_revision:localRevision,node_ids:nodeIds})}
+      {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({from_revision:localRevision,
+        from_revision_token:localRevisionToken,node_ids:nodeIds})}
     );
     const latest=await api("/api/penpot/projects/"+encodeURIComponent(projectId)+"/current");
     input.value=JSON.stringify(latest.document,null,2);
     parent.postMessage({type:"designbridge:update-linked",document:latest.document,node_ids:data.selected_node_ids},"*");
     if(data.can_advance_revision){
-      setRevision(data.to_revision);
+      setRevision(data.to_revision,data.to_revision_token);
       localRevision=data.to_revision;
       syncStatus.textContent="Selected changes fully reconciled revision "+data.to_revision+".";
     }else{
@@ -579,6 +606,7 @@ async function reviewLatest(){
     if(!projectId)throw new Error("This Penpot file is not linked to a DesignBridge project yet.");
     const data=await api("/api/penpot/projects/"+encodeURIComponent(projectId)+"/current");
     currentRevision=data.revision;
+    currentRevisionToken=data.revision_token||null;
     latestSummary.style.display="block";
     latestSummary.textContent="Revision "+data.revision+(data.description?" · "+data.description:"")+(data.created_at?" · "+new Date(data.created_at).toLocaleString():"");
     input.value=JSON.stringify(data.document,null,2);
@@ -598,8 +626,9 @@ async function pullLatest(){
     const data=await api("/api/penpot/projects/"+encodeURIComponent(projectId)+"/current");
     input.value=JSON.stringify(data.document,null,2);
     parent.postMessage({type:"designbridge:update-linked",document:data.document},"*");
-    setRevision(data.revision);
+    setRevision(data.revision,data.revision_token);
     currentRevision=data.revision;
+    currentRevisionToken=data.revision_token||null;
     revisionState.textContent="in_sync · local "+data.revision+" / DesignBridge "+data.revision;
     syncStatus.textContent="Pulled revision "+data.revision+".";
   }catch(error){syncStatus.textContent="Pull failed: "+error.message}
@@ -612,11 +641,12 @@ async function pushSelection(){
     syncStatus.textContent="Comparing and saving Penpot changes…";
     const data=await api(
       "/api/penpot/projects/"+encodeURIComponent(projectId)+"/selection",
-      {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({selection:linked,description:"Penpot direct sync",expected_revision:localRevision})}
+      {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({selection:linked,description:"Penpot direct sync",expected_revision:localRevision,expected_revision_token:localRevisionToken})}
     );
     input.value=JSON.stringify(data.document,null,2);
-    setRevision(data.revision);
+    setRevision(data.revision,data.revision_token);
     currentRevision=data.revision;
+    currentRevisionToken=data.revision_token||null;
     revisionState.textContent="in_sync · local "+data.revision+" / DesignBridge "+data.revision;
     syncStatus.textContent="Saved revision "+data.revision+" with "+data.changes.length+" change(s).";
   }catch(error){
@@ -672,9 +702,10 @@ window.addEventListener("message",event=>{
   if(message?.type==="designbridge:context"){
     projectId=message.project_id||null;
     localRevision=message.revision==null?null:Number(message.revision);
+    localRevisionToken=message.revision_token||null;
     projectIdEl.textContent=projectId||"not linked";
     if(projectId){
-      revisionState.textContent="local "+(localRevision??"?");
+      revisionState.textContent="local "+(localRevision??"?")+(localRevisionToken?" · verified":" · no fingerprint");
       refreshStatus();
       startStatusPolling();
     }else{
