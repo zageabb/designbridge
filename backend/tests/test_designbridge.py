@@ -445,7 +445,11 @@ def test_penpot_status_and_revision_conflict(monkeypatch, tmp_path):
     assert first.status_code == 200
     assert first.json()["revision"] == 1
 
-    status = client.get("/api/penpot/projects/demo/status?local_revision=1")
+    first_token = first.json()["revision_token"]
+    status = client.get(
+        "/api/penpot/projects/demo/status"
+        f"?local_revision=1&local_revision_token={first_token}"
+    )
     assert status.status_code == 200
     assert status.json()["state"] == "in_sync"
     assert status.json()["current_revision"] == 1
