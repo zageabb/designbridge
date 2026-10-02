@@ -1333,3 +1333,102 @@ def test_penpot_commit_variant_switch_blocks_stale_revision(monkeypatch, tmp_pat
         },
     )
     assert response.status_code == 409
+
+
+def _native_variant_payload():
+    return [
+        {
+            "native_variant_id": "penpot-card-state",
+            "library_id": "local-library",
+            "property_names": ["state"],
+            "designbridge_variant_group": "card-state",
+            "components": [
+                {
+                    "penpot_component_id": "penpot-card",
+                    "designbridge_component_id": "card",
+                    "designbridge_variant_group": "card-state",
+                    "name": "Card",
+                    "variant_props": {"state": "default"},
+                },
+                {
+                    "penpot_component_id": "penpot-card-active",
+                    "designbridge_component_id": "card-active",
+                    "designbridge_variant_group": "card-state",
+                    "name": "Card Active",
+                    "variant_props": {"state": "active"},
+                },
+            ],
+        }
+    ]
+
+
+def test_penpot_native_variant_report_endpoint(monkeypatch, tmp_path):
+    from app import main as main_module
+    from app.storage import DesignStore
+
+    document = _variant_test_document()
+    store = DesignStore(tmp_path / "native-variant-report.db")
+    monkeypatch.setattr(main_module, "STORE", store)
+    client = TestClient(main_module.app)
+    saved = store.save(document, description="variants")
+
+    response = client.post(
+        "/api/penpot/projects/demo/native-variant-report",
+        json={"native_variants": _native_variant_payload()},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["revision"] == 1
+    assert body["revision_token"] == saved["revision_token"]
+    assert body["report"]["summary"]["native_mapped"] == 1
+    assert body["report"]["groups"][0]["status"] == "in_sync"
+
+
+def test_penpot_variant_switch_plan_selects_native_strategy(monkeypatch, tmp_path):
+    from app import main as main_module
+    from app.storage import DesignStore
+
+    document = _variant_test_document()
+    store = DesignStore(tmp_path / "native-variant-plan.db")
+    monkeypatch.setattr(main_module, "STORE", store)
+    client = TestClient(main_module.app)
+    saved = store.save(document, description="variants")
+
+    response = client.post(
+        "/api/penpot/projects/demo/variant-switch-plan",
+        json={
+            "instance_id": "card-instance",
+            "target_component_id": "card-active",
+            "native_variants": _native_variant_payload(),
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["revision_token"] == saved["revision_token"]
+    assert body["plan"]["switch_strategy"]["kind"] == "native_variant"
+    assert body["plan"]["switch_strategy"]["steps"] == [
+        {"position": 0, "property": "state", "value": "active"}
+    ]
+
+
+def test_penpot_variant_switch_plan_keeps_swap_fallback_for_non_native_family(monkeypatch, tmp_path):
+    from app import main as main_module
+    from app.storage import DesignStore
+
+    document = _variant_test_document()
+    store = DesignStore(tmp_path / "native-variant-fallback.db")
+    monkeypatch.setattr(main_module, "STORE", store)
+    client = TestClient(main_module.app)
+    store.save(document, description="variants")
+
+    response = client.post(
+        "/api/penpot/projects/demo/variant-switch-plan",
+        json={
+            "instance_id": "card-instance",
+            "target_component_id": "card-active",
+            "native_variants": [],
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["plan"]["switch_strategy"]["kind"] == "component_swap"
