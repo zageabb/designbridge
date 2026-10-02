@@ -10,7 +10,8 @@ from .component_sync import (
     component_definition_report,
     component_instance_report,
     instance_override_changes,
-    plan_variant_switch,
+    native_variant_mapping_report,
+    plan_variant_switch_with_native,
     variant_family_report,
     variant_switch_operation,
 )
@@ -23,7 +24,7 @@ from .revision_diff import compare_documents, selective_pull_plan
 from .storage import DesignStore
 from .three_way import resolution_plan, three_way_review
 
-app = FastAPI(title="DesignBridge API", version="0.18.0")
+app = FastAPI(title="DesignBridge API", version="0.19.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -90,7 +91,7 @@ def _require_base_identity(base: dict, payload: dict) -> None:
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "service": "designbridge", "version": "0.18.0"}
+    return {"status": "ok", "service": "designbridge", "version": "0.19.0"}
 
 
 @app.post("/api/validate")
@@ -277,16 +278,42 @@ def penpot_variant_families(project_id: str) -> dict:
     }
 
 
+@app.post("/api/penpot/projects/{project_id}/native-variant-report")
+def penpot_native_variant_report(project_id: str, payload: dict) -> dict:
+    try:
+        current = STORE.load(project_id)
+        native_groups = [
+            dict(item)
+            for item in payload.get("native_variants", [])
+        ]
+        report = native_variant_mapping_report(
+            current["document"],
+            native_groups,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="project not found")
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return {
+        "project_id": project_id,
+        "revision": current["revision"],
+        "revision_token": current["revision_token"],
+        "report": report,
+    }
+
+
 @app.post("/api/penpot/projects/{project_id}/variant-switch-plan")
 def penpot_variant_switch_plan(project_id: str, payload: dict) -> dict:
     try:
         current = STORE.load(project_id)
         instance_id = str(payload["instance_id"])
         target_component_id = str(payload["target_component_id"])
-        plan = plan_variant_switch(
+        plan = plan_variant_switch_with_native(
             current["document"],
             instance_id,
             target_component_id,
+            [dict(item) for item in payload.get("native_variants", [])],
         )
     except KeyError as exc:
         if exc.args and exc.args[0] in {"instance_id", "target_component_id"}:
