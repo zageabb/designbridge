@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from datetime import datetime, timezone
@@ -36,16 +37,66 @@ class DesignStore:
                     revision INTEGER NOT NULL,
                     description TEXT NOT NULL DEFAULT '',
                     document_json TEXT NOT NULL,
+                    revision_token TEXT,
                     created_at TEXT NOT NULL,
                     PRIMARY KEY (project_id, revision),
                     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
                 );
                 """
             )
+            columns = {
+                row["name"]
+                for row in db.execute("PRAGMA table_info(revisions)").fetchall()
+            }
+            if "revision_token" not in columns:
+                db.execute("ALTER TABLE revisions ADD COLUMN revision_token TEXT")
+
+            rows = db.execute(
+                """
+                SELECT project_id, revision, document_json
+                FROM revisions
+                WHERE revision_token IS NULL OR revision_token = ''
+                """
+            ).fetchall()
+            for row in rows:
+                token = self._token_from_json(row["document_json"])
+                db.execute(
+                    """
+                    UPDATE revisions
+                    SET revision_token = ?
+                    WHERE project_id = ? AND revision = ?
+                    """,
+                    (token, row["project_id"], row["revision"]),
+                )
 
     @staticmethod
     def _now() -> str:
         return datetime.now(timezone.utc).isoformat()
+
+    @staticmethod
+    def _canonical_json(document: DesignBridgeDocument) -> str:
+        return json.dumps(
+            document.model_dump(mode="json", exclude_none=True),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+
+    @staticmethod
+    def _token_from_json(document_json: str) -> str:
+        payload = json.loads(document_json)
+        canonical = json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def revision_token(cls, document: DesignBridgeDocument) -> str:
+        canonical = cls._canonical_json(document)
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     def save(
         self,
@@ -55,10 +106,8 @@ class DesignStore:
     ) -> dict[str, Any]:
         project_id = document.document.id
         now = self._now()
-        encoded = json.dumps(
-            document.model_dump(mode="json", exclude_none=True),
-            separators=(",", ":"),
-        )
+        encoded = self._canonical_json(document)
+        revision_token = self.revision_token(document)
         with self._connect() as db:
             row = db.execute(
                 "SELECT current_revision FROM projects WHERE id = ?",
@@ -93,16 +142,17 @@ class DesignStore:
             db.execute(
                 """
                 INSERT INTO revisions
-                    (project_id, revision, description, document_json, created_at)
-                VALUES (?, ?, ?, ?, ?)
+                    (project_id, revision, description, document_json, revision_token, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (project_id, revision, description, encoded, now),
+                (project_id, revision, description, encoded, revision_token, now),
             )
 
         return {
             "project_id": project_id,
             "revision": revision,
             "description": description,
+            "revision_token": revision_token,
         }
 
     def list_projects(self) -> list[dict[str, Any]]:
@@ -120,7 +170,7 @@ class DesignStore:
         with self._connect() as db:
             rows = db.execute(
                 """
-                SELECT revision, description, created_at
+                SELECT revision, description, revision_token, created_at
                 FROM revisions
                 WHERE project_id = ?
                 ORDER BY revision DESC
@@ -140,7 +190,7 @@ class DesignStore:
             target = revision or int(project["current_revision"])
             row = db.execute(
                 """
-                SELECT revision, description, document_json, created_at
+                SELECT revision, description, document_json, revision_token, created_at
                 FROM revisions
                 WHERE project_id = ? AND revision = ?
                 """,
@@ -154,6 +204,7 @@ class DesignStore:
             "revision": int(row["revision"]),
             "description": row["description"],
             "created_at": row["created_at"],
+            "revision_token": row["revision_token"] or self.revision_token(document),
             "document": document,
         }
 
