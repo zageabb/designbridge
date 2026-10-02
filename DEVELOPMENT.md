@@ -237,26 +237,37 @@ Requirement:
 Discover Penpot-native variant families, map them to canonical DesignBridge variant groups/properties, and use Penpot's native variant switching when the mapping is safe, while retaining the existing component-swap fallback.
 
 Implementation:
-- Pending implementation in this branch.
-- Official Penpot plugin API confirms native variant components expose `variantProps` and shared `Variants.properties`.
-- Official Penpot plugin API confirms component copies support `switchVariant(position, value)`.
-- Native switching will only be selected when canonical and Penpot families map deterministically; otherwise the current safe `swapComponent` fallback remains active.
+- Added Penpot-native variant discovery across local and connected libraries.
+- Discovery records native variant ID, library ID, ordered property names, tagged DesignBridge group, component IDs, and native `variantProps`.
+- Added deterministic backend native-family mapping with `in_sync`, `absent`, `mismatch`, and `ambiguous` states.
+- Native mapping requires exact canonical membership, property-name compatibility, and matching per-component property values.
+- Added `POST /api/penpot/projects/{project_id}/native-variant-report`.
+- Extended variant-switch planning to choose either `native_variant` or `component_swap`.
+- Native strategy contains ordered `switchVariant(position, value)` steps derived from Penpot's property order.
+- Penpot validates the native variant ID immediately before switching, applies native property switches, waits for synchronization, and verifies the resulting DesignBridge component ID.
+- Approved remapped overrides are reapplied after the native switch.
+- Mismatched, absent, or ambiguous native families retain the existing guarded `swapComponent` fallback.
+- Revision number + fingerprint checks remain mandatory before switching and canonical commit.
+- Automatic conversion of ordinary components into VariantContainers remains intentionally out of scope.
 
 Evidence:
 - Branch: `feature/v0.19-native-penpot-variants`.
+- Files: `backend/app/component_sync.py`, `backend/app/main.py`, `penpot-plugin/public/plugin.js`, `penpot-plugin/public/index.html`.
+- Tests: `backend/tests/test_component_sync.py`, `backend/tests/test_designbridge.py`.
+- Documentation: `docs/V0.19_NATIVE_PENPOT_VARIANTS.md`.
 - CI: pending.
 - PR: pending.
 - Merged to intended branch: no.
 - Post-merge verification: pending.
 
 Completion criteria:
-- [ ] Penpot native variant families are discoverable without changing the active page.
-- [ ] Canonical variant groups/properties can be compared with native Penpot variant metadata.
-- [ ] Native-compatible instances use `switchVariant(...)`.
-- [ ] Non-native or mismatched families retain the existing component-swap fallback.
-- [ ] Override compatibility planning remains enforced before either switch mechanism.
-- [ ] Revision fingerprint protections remain enforced.
-- [ ] Tests cover native mapping, native selection, and fallback behavior.
+- [x] Penpot native variant families are discoverable without changing the active page.
+- [x] Canonical variant groups/properties can be compared with native Penpot variant metadata.
+- [x] Native-compatible instances use `switchVariant(...)`.
+- [x] Non-native or mismatched families retain the existing component-swap fallback.
+- [x] Override compatibility planning remains enforced before either switch mechanism.
+- [x] Revision fingerprint protections remain enforced.
+- [x] Tests cover native mapping, native selection, and fallback behavior.
 - [ ] CI passes.
 - [ ] PR is merged to `main`.
 - [ ] Post-merge verification is recorded.
